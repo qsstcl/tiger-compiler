@@ -78,4 +78,4 @@
   }
   <<EOF>> {adjust(); return 0;}
   // handle error
-  . {adjust(); errormsg_->tok_pos_;}
+  . {adjust(); errormsg_->Error(errormsg_->tok_pos_,"Error when parsing the token");}
