@@ -258,7 +258,7 @@ type::Ty *WhileExp::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv,
     errormsg->Error(pos_, "the condition must be an int");
   }
   //进入body后需要将labelcount+1
-  type::Ty* body_ty = body_->SemAnalyze(venv, tenv, labelcount ++, errormsg)->ActualTy();
+  type::Ty* body_ty = body_->SemAnalyze(venv, tenv, labelcount + 1, errormsg)->ActualTy();
   if(typeid(*body_ty) != typeid(type::VoidTy)){
     errormsg->Error(pos_, "while body must produce no value");
   }
@@ -399,7 +399,7 @@ void VarDec::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv, int labelcount,
   /* TODO: Put your lab4 code here */
   type::Ty* init_ty = init_->SemAnalyze(venv, tenv, labelcount, errormsg)->ActualTy();
   if(typ_ == nullptr){
-    if(init_ty->IsSameType(type::NilTy::Instance())){
+    if(typeid(*init_ty) == typeid(type::NilTy)){
       errormsg->Error(pos_, "init should not be nil without type specified");
     }
     venv->Enter(var_, new env::VarEntry(init_ty));

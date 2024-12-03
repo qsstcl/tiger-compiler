@@ -1,5 +1,6 @@
 #include "tiger/frame/x64frame.h"
 #include "tiger/env/env.h"
+#include "tiger/frame/frame.h"
 
 #include <iostream>
 #include <llvm/IR/Function.h>
@@ -116,6 +117,17 @@ public:
 
 frame::Frame *NewFrame(temp::Label *name, std::list<bool> formals) {
   /* TODO: Put your lab5-part1 code here */
+  auto *formals_list = new std::list<frame::Access *>();
+  auto *frame = new X64Frame(name, formals_list);
+  auto offset = 8;
+  //static link
+  auto * static_link_access = new InFrameAccess(offset, frame);
+  for (auto formal : formals) {
+    offset += 8;
+    auto *access = new InFrameAccess(offset, frame);
+    formals_list->push_back(access);
+  }
+  return frame;
 }
 
 

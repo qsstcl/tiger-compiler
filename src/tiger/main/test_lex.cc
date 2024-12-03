@@ -69,6 +69,7 @@ int main(int argc, char **argv) {
     case Parser::STRING:
       printf("%10s %4d %s\n", tokname[tok].data(), scanner.GetTokPos(),
              !scanner.matched().empty() ? scanner.matched().data() : "(null)");
+      
       break;
     case Parser::INT:
       printf("%10s %4d %d\n", tokname[tok].data(), scanner.GetTokPos(),
