@@ -184,7 +184,7 @@ void FunctionDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   /* TODO: Put your lab5-part1 code here */
   auto function_dec_list = this->functions_->GetList();
   for (auto funcDec : function_dec_list) {
-    std::cout << "Declaring function: " << funcDec->name_->Name() << std::endl;
+    // std::cout << "Declaring function: " << funcDec->name_->Name() << std::endl;
 
     // 获取参数列表
     auto params_list = funcDec->params_->GetList();
@@ -300,9 +300,9 @@ void FunctionDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     }
     auto new_frame_size = new_level->frame_->calculateActualFramesize();
     new_func_framesize_global->setInitializer(llvm::ConstantInt::get(ir_builder->getInt64Ty(),new_level->frame_->calculateActualFramesize()));
-    std::cout << "actual type of body_result " << typeid(*(body_result->ty_)).name() << std::endl;
-    std::cout <<typeid(*(body_result->ty_)).name() << std::endl;
-    std::cout <<typeid(type::VoidTy).name() << std::endl;
+    // std::cout << "actual type of body_result " << typeid(*(body_result->ty_)).name() << std::endl;
+    // std::cout <<typeid(*(body_result->ty_)).name() << std::endl;
+    // std::cout <<typeid(type::VoidTy).name() << std::endl;
     if(typeid(*(body_result->ty_))==typeid(type::VoidTy)){
       ir_builder->CreateRetVoid();
     }else{
@@ -320,20 +320,37 @@ void VarDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv, tr::Level *level,
                        err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
   auto init_val_ty = init_->Translate(venv, tenv, level, errormsg);
+
   if (init_val_ty == NULL) {
     errormsg->Error(pos_, "Initilization failed");
     return;
   }
+  auto init_val = init_val_ty->val_;
   auto init_ty = init_val_ty->ty_;
+  if(typeid(*init_) == typeid(VarExp)){
+    auto init_address = init_val_ty->val_;
+    auto init_ptr = ir_builder->CreateIntToPtr(init_address, init_ty->GetLLVMType()->getPointerTo());
+    init_val = ir_builder->CreateLoad(init_ty->GetLLVMType(),init_ptr);
+  }
   auto framesize_global = level->frame_->framesize_global;
-  llvm::Value* function_frame_size = ir_builder->CreateLoad(ir_builder->getInt64Ty(), framesize_global);
-  llvm::Value* offset = ir_builder->CreateAdd(function_frame_size, llvm::ConstantInt::get(ir_builder->getInt64Ty(), -8));
-  llvm::Value* tigermain_sp = level->get_sp();
-  auto var_address= ir_builder->CreateAdd(tigermain_sp, offset);
-  var_address = ir_builder->CreateIntToPtr(var_address, init_ty->GetLLVMType()->getPointerTo());
-  ir_builder->CreateStore(init_val_ty->val_, var_address);
-  tr::Access *access = tr::Access::AllocLocal(level,false);
-  venv->Enter(var_, new env::VarEntry(access, init_ty));
+  auto access =  level->frame_->AllocLocal(true);
+  tr::Access* translate_access = new tr::Access(level,access);
+  // llvm::Value* function_frame_size = ir_builder->CreateLoad(ir_builder->getInt64Ty(), framesize_global);
+  // llvm::Value* tigermain_sp = level->get_sp();
+  // auto var_address= ir_builder->CreateAdd(tigermain_sp, access.);
+  // var_address = ir_builder->CreateIntToPtr(var_address, init_ty->GetLLVMType()->getPointerTo());
+  auto new_var_address = access->get_inframe_address(level->get_sp(), level->frame_->framesize_global, ir_builder);
+  llvm::Value * new_var_ptr = nullptr;
+  // std::cout << "actual type of var_e./ntry->ty_ " << typeid(*(init_ty)).name() << std::endl;
+  // std::cout << "actual type of var_entry->ty_ " << typeid(ArrayTy).name() << std::endl;
+
+  if(typeid(*init_ty) == typeid(type::ArrayTy)){
+    new_var_ptr = ir_builder->CreateIntToPtr(new_var_address, ir_builder->getInt64Ty()->getPointerTo());
+  }else{
+    new_var_ptr = ir_builder->CreateIntToPtr(new_var_address, init_ty->GetLLVMType()->getPointerTo());
+  }
+  ir_builder->CreateStore(init_val, new_var_ptr);
+  venv->Enter(var_, new env::VarEntry(translate_access, init_ty));
 }
 
 type::Ty *NameTy::Translate(env::TEnvPtr tenv, err::ErrorMsg *errormsg) const {
@@ -370,9 +387,9 @@ type::Ty *ArrayTy::Translate(env::TEnvPtr tenv, err::ErrorMsg *errormsg) const {
 
 tr::ValAndTy *SimpleVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                    tr::Level *level,
-                                   err::ErrorMsg *errormsg) const {
+                                    err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  std::cout << this->sym_->Name()<<std::endl;
+  // std::cout << this->sym_->Name()<<std::endl;
   auto entry = venv->Look(this->sym_);
   assert(entry);
   auto var_entry = dynamic_cast<env::VarEntry *>(entry);
@@ -391,13 +408,13 @@ tr::ValAndTy *SimpleVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
       current_level = current_level->parent_;
     }
     auto val_value = frame_access->get_inframe_address(var_level_sp, current_level->frame_->framesize_global, ir_builder);
-    std::cout << "actual type of var_entry->ty_ " << typeid(*(var_entry->ty_)).name() << std::endl;
+    // std::cout << "actual type of var_entry->ty_ " << typeid(*(var_entry->ty_)).name() << std::endl;
     if(typeid(*(var_entry->ty_))==typeid(type::IntTy)){
       return new tr::ValAndTy(val_value, type::IntTy::Instance());
     }else if(typeid(*(var_entry->ty_))==typeid(type::RecordTy)){
       return new tr::ValAndTy(val_value, var_entry->ty_);
     }else if(typeid(*(var_entry->ty_))==typeid(type::StringTy)){
-      std::cout << "string type" << std::endl;
+      // std::cout << "string type" << std::endl;
       return new tr::ValAndTy(val_value, var_entry->ty_);
     }else if(typeid(*(var_entry->ty_))==typeid(type::ArrayTy)){
       return new tr::ValAndTy(val_value, var_entry->ty_);
@@ -412,7 +429,7 @@ tr::ValAndTy *SimpleVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     }else if(typeid(*(var_entry->ty_))==typeid(type::RecordTy)){
       return new tr::ValAndTy(val_value, var_entry->ty_);
     }else if(typeid(*(var_entry->ty_))==typeid(type::StringTy)){
-      std::cout << "string type" << std::endl;
+      // std::cout << "string type" << std::endl;
       return new tr::ValAndTy(val_value, var_entry->ty_);
     }else if(typeid(*(var_entry->ty_))==typeid(type::ArrayTy)){
       return new tr::ValAndTy(val_value, var_entry->ty_);
@@ -468,7 +485,7 @@ tr::ValAndTy *SubscriptVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   /* TODO: Put your lab5-part1 code here */
   tr::ValAndTy *var_val_ty = var_->Translate(venv, tenv, level, errormsg);
 
-  llvm::Value *var_val = var_val_ty->val_;
+  llvm::Value *var_address = var_val_ty->val_;
   type::Ty *var_ty = var_val_ty->ty_;
 
   if (typeid(*var_ty) != typeid(type::ArrayTy)) {
@@ -479,33 +496,46 @@ tr::ValAndTy *SubscriptVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   tr::ValAndTy *sub_val_ty = subscript_->Translate(venv, tenv, level, errormsg);
   llvm::Value *sub_val = sub_val_ty->val_;
   type::Ty *sub_ty = sub_val_ty->ty_;
-
+  if(typeid(*subscript_) != typeid(IntExp)){
+    auto sub_val_address = sub_val;
+    auto sub_val_ptr = ir_builder->CreateIntToPtr(sub_val_address, sub_ty->GetLLVMType()->getPointerTo());
+    sub_val = ir_builder->CreateLoad(sub_ty->GetLLVMType(), sub_val_ptr);
+  }
   if (typeid(*sub_ty) != typeid(type::IntTy)) {
     errormsg->Error(pos_, "subscript is not an integer");
     return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
   }
 
   type::ArrayTy *array_ty = dynamic_cast<type::ArrayTy *>(var_ty);
+  std::cout << "actual type of var_ty " << typeid(var_).name() << std::endl;
+  std::cout << "actual type of subscript " << typeid(subscript_).name() << std::endl;
+  // if (sub_val->getType()->isPointerTy()) {
+  //   sub_val = ir_builder->CreateLoad(
+  //       sub_val->getType()->getPointerElementType(), sub_val);
+  // }
+  auto var_ptr = ir_builder->CreateIntToPtr(var_address, array_ty->GetLLVMType()->getPointerTo());
+  auto var_val = ir_builder->CreateLoad(array_ty->GetLLVMType(), var_ptr);
+  auto array_ptr = ir_builder->CreateIntToPtr(var_val, array_ty->GetLLVMType(),"array_ptr");
 
-  if (sub_val->getType()->isPointerTy()) {
-    sub_val = ir_builder->CreateLoad(
-        sub_val->getType()->getPointerElementType(), sub_val);
-  }
+  auto array_element_ptr = ir_builder->CreateGEP(array_ty->GetLLVMType()->getPointerElementType(), array_ptr, sub_val);
+  // std::string outfile = "temp.ll";
+  // std::error_code EC;
+  // llvm::raw_fd_ostream file(outfile, EC);
+  // ir_module->print(file, nullptr);
+  // llvm::Value *array_ptr = ir_builder->CreateLoad(
+  //     var_val_ty->val_->getType()->getPointerElementType(), var_val_ty->val_);
+  // llvm::Value *array_elem_ptr =
+  //     ir_builder->CreateGEP(array_ptr->getType()->getPointerElementType(),
+  //                           array_ptr, sub_val, "array_elem_ptr");
 
-  llvm::Value *array_ptr = ir_builder->CreateLoad(
-      var_val_ty->val_->getType()->getPointerElementType(), var_val_ty->val_);
-  llvm::Value *array_elem_ptr =
-      ir_builder->CreateGEP(array_ptr->getType()->getPointerElementType(),
-                            array_ptr, sub_val, "array_elem_ptr");
-
-  return new tr::ValAndTy(array_elem_ptr, array_ty->ty_);
+  return new tr::ValAndTy(array_element_ptr, array_ty->ty_);
 }
 
 tr::ValAndTy *VarExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                 tr::Level *level,
                                 err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  std::cout << "actual type" << typeid(*var_).name() << std::endl;
+  // std::cout << "actual type" << typeid(*var_).name() << std::endl;
   return var_->Translate(venv, tenv, level, errormsg);
 }
 
@@ -637,8 +667,8 @@ tr::ValAndTy *OpExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                tr::Level *level,
                                err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  std::cout << "actual type" << typeid(*left_).name() << std::endl;
-  std::cout << "actual type" << typeid(*right_).name() << std::endl;
+  // std::cout << "actual type" << typeid(*left_).name() << std::endl;
+  // std::cout << "actual type" << typeid(*right_).name() << std::endl;
   bool is_left_need_load = false;
   bool is_right_need_load = false;
   if(typeid(*left_) == typeid(VarExp)){
@@ -760,7 +790,7 @@ tr::ValAndTy *SeqExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   llvm::Value *last_val = nullptr;
   type::Ty *last_ty = nullptr;
   for (auto exp : exp_list) {
-    std::cout << "Actual type: " << typeid(*exp).name() << std::endl;
+    // std::cout << "Actual type: " << typeid(*exp).name() << std::endl;
     auto val_ty = exp->Translate(venv, tenv, level, errormsg);
     if (val_ty == nullptr) {
       errormsg->Error(pos_, "Translate failed");
@@ -768,6 +798,12 @@ tr::ValAndTy *SeqExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     }
     last_val = val_ty->val_;
     last_ty = val_ty->ty_;
+    if(typeid(*exp)==typeid(VarExp)){
+      std::cout << "这俩相等" <<std::endl;
+      auto last_val_address = val_ty->val_;
+      auto last_val_ptr = ir_builder->CreateIntToPtr(last_val_address, last_ty->GetLLVMType()->getPointerTo());
+      last_val = ir_builder->CreateLoad(last_ty->GetLLVMType(),last_val_ptr);
+    }
   }
   return new tr::ValAndTy(last_val, last_ty);
 }
@@ -776,19 +812,25 @@ tr::ValAndTy *AssignExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                    tr::Level *level,
                                    err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  std::cout <<"entered assign exp"<<std::endl;
+  // std::cout <<"entered assign exp"<<std::endl;
   auto exp_val_ty = exp_->Translate(venv, tenv, level, errormsg);
   assert(exp_val_ty && exp_val_ty->val_);
   auto exp_val = exp_val_ty->val_;
   auto exp_ty = exp_val_ty->ty_;
+  if(typeid(*exp_) == typeid(VarExp)){
+    auto exp_address = exp_val_ty->val_ ;
+    auto exp_ptr = ir_builder->CreateIntToPtr(exp_address, exp_ty->GetLLVMType()->getPointerTo());
+    exp_val = ir_builder->CreateLoad(exp_ty->GetLLVMType(),exp_ptr);
+  }
+
   auto var_address_ty = var_->Translate(venv, tenv, level, errormsg);
   assert(var_address_ty && var_address_ty->val_);
   auto var_address = var_address_ty->val_;
   auto var_ty = var_address_ty->ty_;
   auto var_ptr = ir_builder->CreateIntToPtr(var_address, var_ty->GetLLVMType()->getPointerTo());
   ir_builder->CreateStore(exp_val, var_ptr);
-  std::cout <<"actual type of var is:" <<typeid(*var_ty).name()<<std::endl;
-  std::cout <<"actual type of exp is:" <<typeid(*exp_ty).name()<<std::endl;
+  // std::cout <<"actual type of var is:" <<typeid(*var_ty).name()<<std::endl;
+  // std::cout <<"actual type of exp is:" <<typeid(*exp_ty).name()<<std::endl;
   return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
 }
 
@@ -849,7 +891,8 @@ tr::ValAndTy *IfExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
       typeid(*then_val_ty->ty_) != typeid(type::RecordTy)) {
     auto then_val_address = then_val_ty->val_;
     auto then_val_ptr = ir_builder->CreateIntToPtr(then_val_address, then_val_ty->ty_->GetLLVMType()->getPointerTo());
-    then_val_ty->val_ = then_val_ptr;
+    auto then_val = ir_builder->CreateLoad(then_val_ty->ty_->GetLLVMType(),then_val_ptr);
+    then_val_ty->val_ = then_val;
   }
   else if (typeid(*then_) == typeid(VarExp) &&
       typeid(*then_val_ty->ty_) == typeid(type::RecordTy)) {
@@ -875,6 +918,7 @@ tr::ValAndTy *IfExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   func->getBasicBlockList().push_back(else_bb);
   ir_builder->SetInsertPoint(else_bb);
   tr::ValAndTy *else_val_ty = nullptr;
+
   if (elsee_) {
     else_val_ty = elsee_->Translate(venv, tenv, level, errormsg);
     if (else_val_ty->val_ && !else_val_ty->ty_->IsSameType(then_val_ty->ty_)) {
@@ -888,12 +932,15 @@ tr::ValAndTy *IfExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
       return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
     }
   }
+  // std::cout << "actual type of el:" << typeid(*(else_val_ty->ty_)).name() << std::endl;
+
   if (else_val_ty->val_ &&
       typeid(*then_val_ty->ty_) != typeid(type::RecordTy) &&
       typeid(*elsee_) == typeid(VarExp)) {
     auto else_val_address = else_val_ty->val_;
     auto else_val_ptr = ir_builder->CreateIntToPtr(else_val_address, else_val_ty->ty_->GetLLVMType()->getPointerTo());
-    else_val_ty->val_ = else_val_ptr;
+    auto else_val = ir_builder->CreateLoad(else_val_ty->ty_->GetLLVMType(),else_val_ptr);
+    else_val_ty->val_ = else_val;
   }
   else if (typeid(*elsee_) == typeid(VarExp) &&
       typeid(*else_val_ty->ty_) == typeid(type::RecordTy)) {
@@ -908,7 +955,10 @@ tr::ValAndTy *IfExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
 
   func->getBasicBlockList().push_back(merge_bb);
   ir_builder->SetInsertPoint(merge_bb);
-
+  //调用print的时候会出现这个情况
+  if(then_val_ty->val_ != nullptr && then_val_ty->ty_ == nullptr){
+    return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
+  }
   if (then_val_ty->ty_->IsSameType(type::VoidTy::Instance())) {
     return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
   }
@@ -916,16 +966,19 @@ tr::ValAndTy *IfExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   // merge the two branches
   llvm::PHINode *phi_node =
       ir_builder->CreatePHI(then_val_ty->val_->getType(), 2, "iftmp");
+  std::cout << "then type" <<then_val_ty->val_->getType() <<std::endl;
   phi_node->addIncoming(then_val_ty->val_, then_bb);
-
+  
   if (!else_val_ty->val_) {
     assert(then_val_ty->val_->getType()->isPointerTy());
     llvm::PointerType *struct_type =
         llvm::cast<llvm::PointerType>(then_val_ty->val_->getType());
     else_val_ty->val_ = llvm::ConstantPointerNull::get(struct_type);
   }
-  
+  std::cout << "else type" <<else_val_ty->val_->getType()<<std::endl;
   phi_node->addIncoming(else_val_ty->val_, else_bb);
+  // std::cout << "actual type of then_val:" << typeid(*then_val_ty->ty_).name() << std::endl;
+  // std::cout << "actual type of else_val:" << typeid(*else_val_ty->ty_).name() << std::endl;
 
   if (phi_node->getType()->isPointerTy() && // phi is pointer to struct?
       typeid(*then_val_ty->ty_) != typeid(type::RecordTy) &&
@@ -957,7 +1010,7 @@ tr::ValAndTy *WhileExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
 
   llvm::Value* condition = test_val_ty->val_;
   auto test_ty = test_val_ty->ty_;
-  std::cout << "test_ty: " << typeid(*test_ty).name() << std::endl;
+  // std::cout << "test_ty: " << typeid(*test_ty).name() << std::endl;
   ir_builder->CreateCondBr(condition,body_label,done_label);
   ir_builder->SetInsertPoint(body_label);
   auto body_val_ty = body_->Translate(venv, tenv, level, errormsg);
@@ -989,8 +1042,8 @@ tr::ValAndTy *ForExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
 
   tr::ValAndTy *lo_val_ty = lo_->Translate(venv, tenv, level, errormsg);
   tr::ValAndTy *hi_val_ty = hi_->Translate(venv, tenv, level, errormsg);
-  std::cout << "actual type of lo:" << typeid(lo_).name() << std::endl;
-  std::cout << "actual type of hi:" << typeid(hi_).name() << std::endl;
+  // std::cout << "actual type of lo:" << typeid(lo_).name() << std::endl;
+  // std::cout << "actual type of hi:" << typeid(hi_).name() << std::endl;
 
   if (typeid(*lo_) == typeid(VarExp)) {
     auto lo_var_address = lo_val_ty->val_;
@@ -1078,7 +1131,7 @@ tr::ValAndTy *LetExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   for (auto dec : decs_list) {
     dec->Translate(venv, tenv, level, errormsg);
   }
-  std::cout << "Actual type: " << typeid(*body_).name() << std::endl;
+  // std::cout << "Actual type: " << typeid(*body_).name() << std::endl;
   return body_->Translate(venv, tenv, level, errormsg);
 }
 
@@ -1108,19 +1161,27 @@ tr::ValAndTy *ArrayExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     errormsg->Error(pos_, "type mismatch");
     return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
   }
-
   llvm::Value *array_size = size_val_ty->val_;
   llvm::Value *array_init = init_val_ty->val_;
 
-  if (array_size->getType()->isPointerTy()) {
-    array_size = ir_builder->CreateLoad(
-        array_size->getType()->getPointerElementType(), array_size);
+  // if (array_size->getType()->isPointerTy()) {
+  //   array_size = ir_builder->CreateLoad(
+  //       array_size->getType()->getPointerElementType(), array_size);
+  // }
+  // if (array_init->getType()->isPointerTy()) {
+  //   array_init = ir_builder->CreateLoad(
+  //       llvm::Type::getInt64Ty(ir_builder->getContext()), array_init);
+  // }
+  if(typeid(*(size_)) == typeid(VarExp)){
+    auto arraysize_address = size_val_ty->val_;
+    auto arraysize_ptr = ir_builder->CreateIntToPtr(arraysize_address, size_val_ty->ty_->GetLLVMType()->getPointerTo());
+    array_size = ir_builder->CreateLoad(size_val_ty->ty_->GetLLVMType(),arraysize_ptr);
   }
-  if (array_init->getType()->isPointerTy()) {
-    array_init = ir_builder->CreateLoad(
-        llvm::Type::getInt64Ty(ir_builder->getContext()), array_init);
+  if(typeid(*(init_)) == typeid(VarExp)){
+    auto init_address = init_val_ty->val_;
+    auto init_ptr = ir_builder->CreateIntToPtr(init_address, size_val_ty->ty_->GetLLVMType()->getPointerTo());
+    array_init = ir_builder->CreateLoad(size_val_ty->ty_->GetLLVMType(),init_ptr);
   }
-
   array_init = ir_builder->CreateSExt(
       array_init, llvm::Type::getInt64Ty(ir_module->getContext()));
 
@@ -1129,10 +1190,12 @@ tr::ValAndTy *ArrayExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   array_args.push_back(array_size);
   array_args.push_back(array_init);
 
-  llvm::Value *array_ptr = ir_builder->CreateCall(init_array, array_args);
+  llvm::Value *array_ptr = ir_builder->CreateCall(init_array, array_args,"array_ptr");
 
-  array_ptr = ir_builder->CreatePtrToInt(
-      array_ptr, llvm::Type::getInt64Ty(ir_builder->getContext()));
+  // std::string outfile = "temp.ll";
+  // std::error_code EC;
+  // llvm::raw_fd_ostream file(outfile, EC);
+  // ir_module->print(file, nullptr);
 
   return new tr::ValAndTy(array_ptr, ty);
 }

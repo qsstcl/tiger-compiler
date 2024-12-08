@@ -29,6 +29,10 @@ declare %string* @substring(%string*, i32, i32)
 
 declare i64 @alloc_record(i32)
 
+declare i64 @init_array(i32, i64)
+
+declare i1 @string_equal(%string*, %string*)
+
 define i32 @tigermain(i64 %0, i64 %1) {
 tigermain:
   %2 = load i64, i64* @tigermain_framesize.1, align 4
@@ -37,20 +41,11 @@ tigermain:
   %5 = add i64 %4, -8
   %6 = add i64 %3, %5
   %7 = inttoptr i64 %6 to i32*
-  store i32 4, i32* %7, align 4
+  store i32 8, i32* %7, align 4
   %8 = load i64, i64* @tigermain_framesize.1, align 4
   %9 = add i64 %3, %8
   %10 = add i64 %9, -8
-  %11 = load i64, i64* @tigermain_framesize.1, align 4
-  %12 = add i64 %3, %11
-  %13 = add i64 %12, -16
-  %14 = inttoptr i64 %13 to i32*
-  store i32 0, i32* %14, align 4
-  br label %for_body
-
-for_incre:                                        ; No predecessors!
-  %15 = load i32, i32* %14, align 4
-  %16 = inttoptr i64 %10 to i32*
-  %17 = load i32, i64 %10, align 4
-  %18 = add i32 %15, 1
+  %11 = inttoptr i64 %10 to i32*
+  %12 = load i32, i32* %11, align 4
+  %array_ptr = call i64 @init_array(i32 %12, i64 0)
 }
