@@ -1,6 +1,7 @@
 #include "tiger/frame/x64frame.h"
 #include "tiger/env/env.h"
 #include "tiger/frame/frame.h"
+#include "llvm/IR/GlobalVariable.h"
 
 #include <iostream>
 #include <llvm/IR/Function.h>
@@ -88,6 +89,13 @@ public:
       : offset(offset), parent_frame(parent) {}
 
   /* TODO: Put your lab5-part1 code here */
+  llvm::Value* get_inframe_address(llvm::Value* sp_value, llvm::GlobalVariable* function_framesize,llvm::IRBuilder<> *ir_builder) {
+    llvm::Value* offset_value = llvm::ConstantInt::get(ir_builder->getInt64Ty(), offset);
+    llvm::Value* framesize_value = ir_builder->CreateLoad(ir_builder->getInt64Ty(), function_framesize);
+    llvm::Value* stack_top_address = ir_builder->CreateAdd(sp_value, framesize_value);
+    llvm::Value* var_address = ir_builder->CreateAdd(stack_top_address, offset_value);
+    return var_address;
+  }
 };
 
 
@@ -106,7 +114,6 @@ public:
 
     offset_ -= reg_manager->WordSize();
     access = new InFrameAccess(offset_, this);
-
     return access;
   }
   void AllocOutgoSpace(int size) override {
@@ -119,9 +126,13 @@ frame::Frame *NewFrame(temp::Label *name, std::list<bool> formals) {
   /* TODO: Put your lab5-part1 code here */
   auto *formals_list = new std::list<frame::Access *>();
   auto *frame = new X64Frame(name, formals_list);
+  frame->framesize_global = new llvm::GlobalVariable(
+      *ir_module, llvm::Type::getInt64Ty(ir_builder->getContext()), false,
+      llvm::GlobalValue::ExternalLinkage, nullptr, name->Name() + "_framesize");
   auto offset = 8;
   //static link
   auto * static_link_access = new InFrameAccess(offset, frame);
+  formals_list->push_back(static_link_access);
   for (auto formal : formals) {
     offset += 8;
     auto *access = new InFrameAccess(offset, frame);
