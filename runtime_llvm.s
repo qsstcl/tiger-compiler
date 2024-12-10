@@ -229,31 +229,6 @@ print:                                  # @print
 	.size	print, .Lfunc_end4-print
 	.cfi_endproc
                                         # -- End function
-	.globl	printi                          # -- Begin function printi
-	.p2align	4, 0x90
-	.type	printi,@function
-printi:                                 # @printi
-	.cfi_startproc
-# %bb.0:
-	pushq	%rbp
-	.cfi_def_cfa_offset 16
-	.cfi_offset %rbp, -16
-	movq	%rsp, %rbp
-	.cfi_def_cfa_register %rbp
-	subq	$16, %rsp
-	movl	%edi, -4(%rbp)
-	movl	-4(%rbp), %esi
-	leaq	.L.str(%rip), %rdi
-	movb	$0, %al
-	callq	printf@PLT
-	addq	$16, %rsp
-	popq	%rbp
-	.cfi_def_cfa %rsp, 8
-	retq
-.Lfunc_end5:
-	.size	printi, .Lfunc_end5-printi
-	.cfi_endproc
-                                        # -- End function
 	.globl	flush                           # -- Begin function flush
 	.p2align	4, 0x90
 	.type	flush,@function
@@ -271,8 +246,34 @@ flush:                                  # @flush
 	popq	%rbp
 	.cfi_def_cfa %rsp, 8
 	retq
+.Lfunc_end5:
+	.size	flush, .Lfunc_end5-flush
+	.cfi_endproc
+                                        # -- End function
+	.globl	printi                          # -- Begin function printi
+	.p2align	4, 0x90
+	.type	printi,@function
+printi:                                 # @printi
+	.cfi_startproc
+# %bb.0:
+	pushq	%rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset %rbp, -16
+	movq	%rsp, %rbp
+	.cfi_def_cfa_register %rbp
+	subq	$16, %rsp
+	movl	%edi, -4(%rbp)
+	movl	-4(%rbp), %esi
+	leaq	.L.str(%rip), %rdi
+	movb	$0, %al
+	callq	printf@PLT
+	callq	flush
+	addq	$16, %rsp
+	popq	%rbp
+	.cfi_def_cfa %rsp, 8
+	retq
 .Lfunc_end6:
-	.size	flush, .Lfunc_end6-flush
+	.size	printi, .Lfunc_end6-printi
 	.cfi_endproc
                                         # -- End function
 	.globl	main                            # -- Begin function main
@@ -732,8 +733,9 @@ consts:
 	.addrsig
 	.addrsig_sym malloc
 	.addrsig_sym putchar
-	.addrsig_sym printf
+	.addrsig_sym flush
 	.addrsig_sym fflush
+	.addrsig_sym printf
 	.addrsig_sym tigermain
 	.addrsig_sym exit
 	.addrsig_sym getc

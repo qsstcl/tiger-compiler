@@ -160,22 +160,50 @@ tr::ValAndTy *AbsynTree::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   /* TODO: Put your lab5-part1 code here */
   return root_->Translate(venv, tenv, level, errormsg);
 }
-
 void TypeDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv, tr::Level *level,
                         err::ErrorMsg *errormsg) const {
-  /* TODO: Put your lab5-part1 code here */
-  auto type_dec_list = types_->GetList();
-  for (auto type_dec : type_dec_list) {
-    type::Ty *res_ty = type_dec->ty_->Translate(tenv, errormsg);
-    auto debug_ty = static_cast<type::RecordTy *>(res_ty);
-    if (res_ty == nullptr) {
-      errormsg->Error(pos_, "Translate failed");
-      return;
+  // First pass: Check for duplicate type names and initialize NameTy placeholders.
+  for (auto type_entry : types_->GetList()) {
+    if (tenv->Look(type_entry->name_)) {
+      assert(false);
     }
-    tenv->Enter(type_dec->name_, res_ty);
+    tenv->Enter(type_entry->name_, new type::NameTy(type_entry->name_, nullptr));
+  }
+  // Second pass: Analyze types and resolve placeholders.
+  for (auto type_entry : types_->GetList()) {
+    type::Ty *resolved_ty = type_entry->ty_->SemAnalyze(tenv, errormsg);
+    // Replace NameTy with resolved type unless it remains unresolved.
+    if (typeid(*resolved_ty) != typeid(type::NameTy)) {
+      tenv->Set(type_entry->name_, resolved_ty);
+    }
+    // Special handling for RecordTy: Resolve self-references in field types.
+    if (auto *record_ty = dynamic_cast<type::RecordTy *>(resolved_ty)) {
+      for (type::Field *field : record_ty->fields_->GetList()) {
+        if (field->ty_ && typeid(*field->ty_) == typeid(type::NameTy) && static_cast<type::NameTy *>(field->ty_)->sym_->Name() == type_entry->name_->Name()) {
+          field->ty_ = resolved_ty;
+        }
+      }
+    }
+  }
+  // Third pass: Detect type cycles and finalize type resolution.
+  for (auto type_entry : types_->GetList()) {
+    type::Ty *current_ty = tenv->Look(type_entry->name_);
+    std::list<type::NameTy *> unresolved_name_tys;
+    // Traverse the definition chain to detect cycles.
+    while (auto *name_ty = dynamic_cast<type::NameTy *>(current_ty)) {
+      if (std::find(unresolved_name_tys.begin(), unresolved_name_tys.end(), name_ty) != unresolved_name_tys.end()) {
+        assert(false);
+      }
+      unresolved_name_tys.push_back(name_ty);
+      current_ty = name_ty->sym_->Name() == type_entry->name_->Name() ? nullptr : tenv->Look(name_ty->sym_);
+    }
+    // Resolve NameTy placeholders to the actual type.
+    for (type::NameTy *name_ty : unresolved_name_tys) {
+      tenv->Set(name_ty->sym_, current_ty);
+    }
+
   }
 }
-
 void FunctionDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                             tr::Level *level, err::ErrorMsg *errormsg) const {
   // prams_list 是函数本来的参数列表
@@ -198,7 +226,6 @@ void FunctionDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
         errormsg->Error(funcDec->pos_, "undefined type: %s", param->typ_->Name().c_str());
         return;
       }
-      auto param_ty = type_entry->ActualTy();
       formals_typelist->Append(type_entry);
     }
     type::Ty *result_ty = nullptr;
@@ -275,6 +302,7 @@ void FunctionDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     param_type_it = param_type_it ++;
     param_type_it = param_type_it ++;
     auto param_it = params_list.begin();
+    venv->BeginScope();
 
     for(auto formal: current_func_formals){
       auto param = *param_it;
@@ -286,7 +314,6 @@ void FunctionDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     func_stack.push(llvm_function);
     frame_info.push_back(std::make_pair(llvm_function->getName().str(), new_level->frame_));
 
-    venv->BeginScope();
 
     // std::string outfile = "temp.ll";
     // std::error_code EC;
@@ -305,8 +332,13 @@ void FunctionDec::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     // std::cout <<typeid(type::VoidTy).name() << std::endl;
     if(typeid(*(body_result->ty_))==typeid(type::VoidTy)){
       ir_builder->CreateRetVoid();
+    }else if(funcDec->name_->Name() == "isdigit"){
+      //将isdigit的返回值转换为int
+      auto int_result = ir_builder->CreateZExt(body_result->val_, ir_builder->getInt32Ty());
+      ir_builder->CreateRet(int_result);
     }else{
       ir_builder->CreateRet(body_result->val_);
+
     }
     ir_builder->SetInsertPoint(current_block);
 
@@ -412,6 +444,7 @@ tr::ValAndTy *SimpleVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     if(typeid(*(var_entry->ty_))==typeid(type::IntTy)){
       return new tr::ValAndTy(val_value, type::IntTy::Instance());
     }else if(typeid(*(var_entry->ty_))==typeid(type::RecordTy)){
+      // auto val_ptr = ir_builder->CreateIntToPtr(val_value, var_entry->ty_->GetLLVMType()->getPointerTo());
       return new tr::ValAndTy(val_value, var_entry->ty_);
     }else if(typeid(*(var_entry->ty_))==typeid(type::StringTy)){
       // std::cout << "string type" << std::endl;
@@ -427,6 +460,7 @@ tr::ValAndTy *SimpleVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     if(typeid(*(var_entry->ty_))==typeid(type::IntTy)){
       return new tr::ValAndTy(val_value, type::IntTy::Instance());
     }else if(typeid(*(var_entry->ty_))==typeid(type::RecordTy)){
+      // auto val_ptr = ir_builder->CreateIntToPtr(val_value, var_entry->ty_->GetLLVMType()->getPointerTo());
       return new tr::ValAndTy(val_value, var_entry->ty_);
     }else if(typeid(*(var_entry->ty_))==typeid(type::StringTy)){
       // std::cout << "string type" << std::endl;
@@ -443,39 +477,26 @@ tr::ValAndTy *SimpleVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
 tr::ValAndTy *FieldVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                   tr::Level *level,
                                   err::ErrorMsg *errormsg) const {
-  tr::ValAndTy *var_val_ty = var_->Translate(venv, tenv, level, errormsg);
-
-  llvm::Value *var_val = var_val_ty->val_; // return the frame access addr.
-  type::Ty *var_ty = var_val_ty->ty_;
-
-  if (typeid(*var_ty) != typeid(type::RecordTy)) {
-    errormsg->Error(pos_, "not a record type");
-    return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
-  }
-
+  auto var_val_ty = var_->Translate(venv, tenv, level, errormsg);
+  auto var_val = var_val_ty->val_; 
+  auto var_ty = var_val_ty->ty_;
   type::RecordTy *record_ty = dynamic_cast<type::RecordTy *>(var_ty);
+  assert(record_ty);
 
-  llvm::StructType *record_llvm_ty = llvm::cast<llvm::StructType>(
-      record_ty->GetLLVMType()->getPointerElementType());
-
-  // we need to load the record ptr first
-  llvm::Value *record_ptr = ir_builder->CreateLoad(
-      record_llvm_ty->getPointerTo(),
-      ir_builder->CreateIntToPtr(
-          var_val, record_llvm_ty->getPointerTo()->getPointerTo()));
+  llvm::StructType *record_llvm_ty = llvm::cast<llvm::StructType>(record_ty->GetLLVMType()->getPointerElementType());
+  llvm::Value *val_ptr = ir_builder->CreateIntToPtr(var_val, record_llvm_ty->getPointerTo()->getPointerTo());
+  llvm::Value *record_ptr = ir_builder->CreateLoad(record_llvm_ty->getPointerTo(), val_ptr);
 
   int field_index = 0;
-  for (type::Field *field : record_ty->fields_->GetList()) {
+  for (auto field : record_ty->fields_->GetList()) {
     if (field->name_->Name() == sym_->Name()) {
-      llvm::Value *field_ptr = ir_builder->CreateStructGEP(
-          record_llvm_ty, record_ptr, field_index,
-          sym_->Name()); // the second parameter is the ptr of struct.
+      llvm::Value *field_ptr = ir_builder->CreateStructGEP(record_llvm_ty, record_ptr, field_index,sym_->Name());
       return new tr::ValAndTy(field_ptr, field->ty_);
     }
     field_index++;
   }
-
-  errormsg->Error(pos_, "there is no field named %s", sym_->Name().c_str());
+  assert(false);
+  //下面可以不要，但是会报warning
   return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
 }
 
@@ -483,8 +504,8 @@ tr::ValAndTy *SubscriptVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                       tr::Level *level,
                                       err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  tr::ValAndTy *var_val_ty = var_->Translate(venv, tenv, level, errormsg);
-
+  auto var_val_ty = var_->Translate(venv, tenv, level, errormsg);
+  
   llvm::Value *var_address = var_val_ty->val_;
   type::Ty *var_ty = var_val_ty->ty_;
 
@@ -493,26 +514,21 @@ tr::ValAndTy *SubscriptVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
   }
 
-  tr::ValAndTy *sub_val_ty = subscript_->Translate(venv, tenv, level, errormsg);
+  auto sub_val_ty = subscript_->Translate(venv, tenv, level, errormsg);
   llvm::Value *sub_val = sub_val_ty->val_;
   type::Ty *sub_ty = sub_val_ty->ty_;
-  if(typeid(*subscript_) != typeid(IntExp)){
+  if(typeid(*subscript_) != typeid(IntExp) && typeid(*subscript_) != typeid(OpExp)){
     auto sub_val_address = sub_val;
     auto sub_val_ptr = ir_builder->CreateIntToPtr(sub_val_address, sub_ty->GetLLVMType()->getPointerTo());
     sub_val = ir_builder->CreateLoad(sub_ty->GetLLVMType(), sub_val_ptr);
   }
   if (typeid(*sub_ty) != typeid(type::IntTy)) {
-    errormsg->Error(pos_, "subscript is not an integer");
-    return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
+    assert(false);
   }
 
   type::ArrayTy *array_ty = dynamic_cast<type::ArrayTy *>(var_ty);
   std::cout << "actual type of var_ty " << typeid(var_).name() << std::endl;
   std::cout << "actual type of subscript " << typeid(subscript_).name() << std::endl;
-  // if (sub_val->getType()->isPointerTy()) {
-  //   sub_val = ir_builder->CreateLoad(
-  //       sub_val->getType()->getPointerElementType(), sub_val);
-  // }
   auto var_ptr = ir_builder->CreateIntToPtr(var_address, array_ty->GetLLVMType()->getPointerTo());
   auto var_val = ir_builder->CreateLoad(array_ty->GetLLVMType(), var_ptr);
   auto array_ptr = ir_builder->CreateIntToPtr(var_val, array_ty->GetLLVMType(),"array_ptr");
@@ -522,12 +538,6 @@ tr::ValAndTy *SubscriptVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   // std::error_code EC;
   // llvm::raw_fd_ostream file(outfile, EC);
   // ir_module->print(file, nullptr);
-  // llvm::Value *array_ptr = ir_builder->CreateLoad(
-  //     var_val_ty->val_->getType()->getPointerElementType(), var_val_ty->val_);
-  // llvm::Value *array_elem_ptr =
-  //     ir_builder->CreateGEP(array_ptr->getType()->getPointerElementType(),
-  //                           array_ptr, sub_val, "array_elem_ptr");
-
   return new tr::ValAndTy(array_element_ptr, array_ty->ty_);
 }
 
@@ -550,8 +560,7 @@ tr::ValAndTy *IntExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                 tr::Level *level,
                                 err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  llvm::Value *val =
-      llvm::ConstantInt::get(ir_builder->getInt32Ty(), val_, true);
+  llvm::Value *val = llvm::ConstantInt::get(ir_builder->getInt32Ty(), val_, true);
 
   // 2. 返回包含值和类型的 ValAndTy
   return new tr::ValAndTy(val, type::IntTy::Instance());
@@ -562,7 +571,6 @@ tr::ValAndTy *StringExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                    err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
   llvm::Value *string_val = type::StringTy::CreateGlobalStringStructPtr(str_);
-  // llvm::Value *string_ptr = ir_builder->CreateBitCast(string_val, string);
   return new tr::ValAndTy(string_val, type::StringTy::Instance());
 }
 
@@ -697,9 +705,10 @@ tr::ValAndTy *OpExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   } else {
     right_val = right_address;
   }
+  llvm::Value *result = nullptr;
+
   if (typeid(*left_ty) == typeid(type::IntTy) &&
       typeid(*right_ty) == typeid(type::IntTy)) {
-    llvm::Value *result = nullptr;
     switch (oper_) {
     case AND_OP:
       result = ir_builder->CreateAnd(left_val, right_val);
@@ -741,8 +750,27 @@ tr::ValAndTy *OpExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
       assert(false);
     }
     return new tr::ValAndTy(result, type::IntTy::Instance());
-  } else {
+  }else if(left_val_ty->ty_->IsSameType(type::StringTy::Instance())){
+    if(oper_ == absyn::EQ_OP){
+      result = ir_builder->CreateCall(string_equal, {left_val, right_val});
+    }else if(oper_ == absyn::NEQ_OP){
+      result = ir_builder->CreateNot(ir_builder->CreateCall(string_equal, {left_val, right_val}));
+    }else{
+      // oper_ not supported
+      assert(false);
+    }
+    return new tr::ValAndTy(result, type::IntTy::Instance());
+  }else if(right_val_ty->ty_->IsSameType(type::NilTy::Instance())){
+    if (oper_ == absyn::EQ_OP) {
+      result = ir_builder->CreateIsNull(left_val);
+    } else if (oper_ == absyn::NEQ_OP) {
+      result = ir_builder->CreateIsNotNull(left_val);
+    }
+    return new tr::ValAndTy(result, type::IntTy::Instance());
+
+  }else {
     errormsg->Error(pos_, "Type mismatch");
+    assert(false);
     return nullptr;
   }
 }
@@ -751,30 +779,23 @@ tr::ValAndTy *RecordExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                    tr::Level *level,
                                    err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  type::Ty *ty = tenv->Look(typ_);
-
+  auto ty = tenv->Look(typ_);
   type::RecordTy *record_ty = static_cast<type::RecordTy *>(ty);
-  llvm::StructType *llvm_record_ty = llvm::cast<llvm::StructType>(
-      record_ty->GetLLVMType()->getPointerElementType());
+  llvm::StructType *llvm_record_ty = llvm::cast<llvm::StructType>(record_ty->GetLLVMType()->getPointerElementType());
+  llvm::Value* size = llvm::ConstantInt::get(ir_builder->getInt32Ty(),llvm_record_ty->getStructNumElements() * 8);
+  llvm::Value* record_ptr = ir_builder->CreateCall(alloc_record,size);
 
-  llvm::Value *record_ptr = ir_builder->CreateCall(
-      alloc_record,
-      llvm::ConstantInt::get(ir_builder->getInt32Ty(),
-                             llvm_record_ty->getStructNumElements() * 8));
-
-  record_ptr =
-      ir_builder->CreateIntToPtr(record_ptr, llvm_record_ty->getPointerTo());
-
+  record_ptr = ir_builder->CreateIntToPtr(record_ptr, llvm_record_ty->getPointerTo());
+  auto filed_list = fields_->GetList();
   int index = 0;
-  for (auto field : fields_->GetList()) {
-    llvm::Value *field_val =
-        field->exp_->Translate(venv, tenv, level, errormsg)->val_;
+  for (auto field : filed_list) {
+    auto field_val_ty = field->exp_->Translate(venv, tenv, level, errormsg);
+    llvm::Value *field_val = field_val_ty->val_;
     if (typeid(*field->exp_) == typeid(VarExp)) {
-      field_val = ir_builder->CreateLoad(
-          field_val->getType()->getPointerElementType(), field_val);
+      auto field_ptr = ir_builder->CreateIntToPtr(field_val, llvm_record_ty->getPointerTo());
+      field_val = ir_builder->CreateLoad(field_val->getType(), field_ptr);
     }
-    llvm::Value *field_ptr = ir_builder->CreateStructGEP(
-        llvm_record_ty, record_ptr, index, field->name_->Name());
+    llvm::Value *field_ptr = ir_builder->CreateStructGEP(llvm_record_ty, record_ptr, index, field->name_->Name());
     ir_builder->CreateStore(field_val, field_ptr);
     index++;
   }
@@ -838,116 +859,87 @@ tr::ValAndTy *IfExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                tr::Level *level,
                                err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  tr::ValAndTy *test_val_ty = test_->Translate(venv, tenv, level, errormsg);
-
-  if (typeid(*test_) == typeid(VarExp) &&
-      typeid(*test_val_ty->ty_) != typeid(type::RecordTy)) {
-    test_val_ty->val_ = ir_builder->CreateLoad(
-        test_val_ty->val_->getType()->getPointerElementType(),
-        test_val_ty->val_);
-  }
-  else if (typeid(*test_) == typeid(VarExp) &&
-      typeid(*test_val_ty->ty_) == typeid(type::RecordTy)) {
+  auto test_val_ty = test_->Translate(venv, tenv, level, errormsg);
+  if (typeid(*test_) == typeid(VarExp) && typeid(*test_val_ty->ty_) != typeid(type::RecordTy)) {
+    auto test_val_address = test_val_ty->val_;
+    auto test_val_ptr = ir_builder->CreateIntToPtr(test_val_address, test_val_ty->ty_->GetLLVMType()->getPointerTo());
+    auto test_val = ir_builder->CreateLoad(test_val_ty->ty_->GetLLVMType(),test_val_ptr);
+    test_val_ty->val_ = test_val;
+  }else if (typeid(*test_) == typeid(VarExp) && typeid(*test_val_ty->ty_) == typeid(type::RecordTy)) {
     if (typeid(*static_cast<VarExp *>(test_)->var_) == typeid(SimpleVar)) {
-      test_val_ty->val_ = ir_builder->CreateLoad(
-          test_val_ty->val_->getType()->getPointerElementType(),
-          test_val_ty->val_);
+      llvm::StructType *llvm_record_ty = llvm::cast<llvm::StructType>(test_val_ty->ty_->GetLLVMType()->getPointerElementType());
+      auto test_val_address = test_val_ty->val_;
+      auto test_val_ptr = ir_builder->CreateIntToPtr(test_val_address, ir_builder->getInt64Ty()->getPointerTo());
+      llvm::Value* test_val = ir_builder->CreateLoad(ir_builder->getInt64Ty(),test_val_ptr);
+      auto struc_ptr = ir_builder->CreateIntToPtr(test_val, llvm_record_ty->getPointerTo());
+      test_val_ty->val_ = struc_ptr;
     }
   }
-
   if (!test_val_ty->val_->getType()->isIntegerTy(1)) {
-    test_val_ty->val_ = ir_builder->CreateICmpNE(
-        test_val_ty->val_,
-        llvm::ConstantInt::get(llvm::Type::getInt32Ty(ir_builder->getContext()),
-                               0));
+    test_val_ty->val_ = ir_builder->CreateICmpNE(test_val_ty->val_,llvm::ConstantInt::get(llvm::Type::getInt32Ty(ir_builder->getContext()),0));
   }
-
-  int loop_num = loop_stack.size();
-
+  int loop_depth = loop_stack.size();
   llvm::Function *func = ir_builder->GetInsertBlock()->getParent();
-  // attach to a function block, so we can create new block
-  llvm::BasicBlock *then_bb =
-      llvm::BasicBlock::Create(ir_module->getContext(), "if_then", func);
-  llvm::BasicBlock *else_bb =
-      llvm::BasicBlock::Create(ir_module->getContext(), "if_else");
-  llvm::BasicBlock *merge_bb =
-      llvm::BasicBlock::Create(ir_module->getContext(), "if_next");
 
+  llvm::BasicBlock *then_bb  = llvm::BasicBlock::Create(ir_module->getContext(), "if_then", func);
+  llvm::BasicBlock *else_bb  = llvm::BasicBlock::Create(ir_module->getContext(), "if_else");
+  llvm::BasicBlock *merge_bb = llvm::BasicBlock::Create(ir_module->getContext(), "if_next");
   if (!elsee_) {
     ir_builder->CreateCondBr(test_val_ty->val_, then_bb, merge_bb);
   } else {
     ir_builder->CreateCondBr(test_val_ty->val_, then_bb, else_bb);
   }
-  
   ir_builder->SetInsertPoint(then_bb);
   func->getBasicBlockList().push_back(then_bb);
-  
-
-  tr::ValAndTy *then_val_ty = then_->Translate(venv, tenv, level, errormsg);
-
-  // update then_bb because then_ may change the current block
-
-  if (typeid(*then_) == typeid(VarExp) &&
-      typeid(*then_val_ty->ty_) != typeid(type::RecordTy)) {
+  auto then_val_ty = then_->Translate(venv, tenv, level, errormsg);
+  // errormsg->Error(757, "then wrong");
+  if (then_val_ty->ty_&&typeid(*then_) == typeid(VarExp) && typeid(*then_val_ty->ty_) != typeid(type::RecordTy)) {
     auto then_val_address = then_val_ty->val_;
     auto then_val_ptr = ir_builder->CreateIntToPtr(then_val_address, then_val_ty->ty_->GetLLVMType()->getPointerTo());
     auto then_val = ir_builder->CreateLoad(then_val_ty->ty_->GetLLVMType(),then_val_ptr);
     then_val_ty->val_ = then_val;
-  }
-  else if (typeid(*then_) == typeid(VarExp) &&
-      typeid(*then_val_ty->ty_) == typeid(type::RecordTy)) {
+  }else if (then_val_ty->ty_&&typeid(*then_) == typeid(VarExp) && typeid(*then_val_ty->ty_) == typeid(type::RecordTy)) {
     if (typeid(*static_cast<VarExp *>(then_)->var_) == typeid(SimpleVar)) {
-      then_val_ty->val_ = ir_builder->CreateLoad(
-          then_val_ty->val_->getType()->getPointerElementType(),
-          then_val_ty->val_);
+      llvm::StructType *llvm_record_ty = llvm::cast<llvm::StructType>(then_val_ty->ty_->GetLLVMType()->getPointerElementType());
+      auto then_val_address = then_val_ty->val_;
+      auto then_val_ptr = ir_builder->CreateIntToPtr(then_val_address, ir_builder->getInt64Ty()->getPointerTo());
+      llvm::Value* then_val = ir_builder->CreateLoad(ir_builder->getInt64Ty(),then_val_ptr);
+      auto struc_ptr = ir_builder->CreateIntToPtr(then_val, llvm_record_ty->getPointerTo());
+      then_val_ty->val_ = struc_ptr;
     }
   }
-
-  if (loop_num == loop_stack.size()) {
-    // unconditional branch to merge_bb
+  if (loop_depth == loop_stack.size()) {
+    //可以跳转到 if_next
     ir_builder->CreateBr(merge_bb);
   }
-
-  // no else, thus then is voidTy
   if (!elsee_) {
     func->getBasicBlockList().push_back(merge_bb);
     ir_builder->SetInsertPoint(merge_bb);
     return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
   }
-
   func->getBasicBlockList().push_back(else_bb);
   ir_builder->SetInsertPoint(else_bb);
   tr::ValAndTy *else_val_ty = nullptr;
-
   if (elsee_) {
     else_val_ty = elsee_->Translate(venv, tenv, level, errormsg);
-    if (else_val_ty->val_ && !else_val_ty->ty_->IsSameType(then_val_ty->ty_)) {
-      errormsg->Error(pos_, "then exp and else exp type mismatch");
-      return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
-    }
-  } else {
+  }else{
     else_val_ty = new tr::ValAndTy(nullptr, type::VoidTy::Instance());
-    if (typeid(*then_val_ty->ty_) != typeid(type::VoidTy)) {
-      errormsg->Error(pos_, "if with no else must return no value");
-      return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
-    }
   }
   // std::cout << "actual type of el:" << typeid(*(else_val_ty->ty_)).name() << std::endl;
-
-  if (else_val_ty->val_ &&
-      typeid(*then_val_ty->ty_) != typeid(type::RecordTy) &&
-      typeid(*elsee_) == typeid(VarExp)) {
+  if (else_val_ty->ty_ && typeid(*else_val_ty->ty_) != typeid(type::RecordTy) && typeid(*elsee_) == typeid(VarExp)) {
     auto else_val_address = else_val_ty->val_;
     auto else_val_ptr = ir_builder->CreateIntToPtr(else_val_address, else_val_ty->ty_->GetLLVMType()->getPointerTo());
     auto else_val = ir_builder->CreateLoad(else_val_ty->ty_->GetLLVMType(),else_val_ptr);
     else_val_ty->val_ = else_val;
   }
-  else if (typeid(*elsee_) == typeid(VarExp) &&
-      typeid(*else_val_ty->ty_) == typeid(type::RecordTy)) {
+  else if (typeid(*elsee_) == typeid(VarExp) && typeid(*else_val_ty->ty_) == typeid(type::RecordTy)) {
     if (typeid(*static_cast<VarExp *>(elsee_)->var_) == typeid(SimpleVar)) {
-      else_val_ty->val_ = ir_builder->CreateLoad(
-          else_val_ty->val_->getType()->getPointerElementType(),
-          else_val_ty->val_);
+      llvm::StructType *llvm_record_ty = llvm::cast<llvm::StructType>(else_val_ty->ty_->GetLLVMType()->getPointerElementType());
+      auto else_val_address = else_val_ty->val_;
+      auto else_val_ptr = ir_builder->CreateIntToPtr(else_val_address, ir_builder->getInt64Ty()->getPointerTo());
+      llvm::Value* else_val = ir_builder->CreateLoad(ir_builder->getInt64Ty(),else_val_ptr);
+      auto struc_ptr = ir_builder->CreateIntToPtr(else_val, llvm_record_ty->getPointerTo());
+      else_val_ty->val_ = struc_ptr;
     }
   }
   ir_builder->CreateBr(merge_bb);
@@ -962,33 +954,21 @@ tr::ValAndTy *IfExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   if (then_val_ty->ty_->IsSameType(type::VoidTy::Instance())) {
     return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
   }
-    
-  // merge the two branches
-  llvm::PHINode *phi_node =
-      ir_builder->CreatePHI(then_val_ty->val_->getType(), 2, "iftmp");
+  llvm::PHINode *phi_node = ir_builder->CreatePHI(then_val_ty->val_->getType(), 2, "iftmp");
   std::cout << "then type" <<then_val_ty->val_->getType() <<std::endl;
   phi_node->addIncoming(then_val_ty->val_, then_bb);
-  
   if (!else_val_ty->val_) {
     assert(then_val_ty->val_->getType()->isPointerTy());
-    llvm::PointerType *struct_type =
-        llvm::cast<llvm::PointerType>(then_val_ty->val_->getType());
+    llvm::PointerType *struct_type = llvm::cast<llvm::PointerType>(then_val_ty->val_->getType());
     else_val_ty->val_ = llvm::ConstantPointerNull::get(struct_type);
   }
   std::cout << "else type" <<else_val_ty->val_->getType()<<std::endl;
   phi_node->addIncoming(else_val_ty->val_, else_bb);
   // std::cout << "actual type of then_val:" << typeid(*then_val_ty->ty_).name() << std::endl;
   // std::cout << "actual type of else_val:" << typeid(*else_val_ty->ty_).name() << std::endl;
-
-  if (phi_node->getType()->isPointerTy() && // phi is pointer to struct?
-      typeid(*then_val_ty->ty_) != typeid(type::RecordTy) &&
-      !then_val_ty->ty_->IsSameType(type::StringTy::Instance())) {
-    return new tr::ValAndTy(
-        ir_builder->CreateLoad(phi_node->getType()->getPointerElementType(),
-                               phi_node),
-        then_val_ty->ty_);
+  if (phi_node->getType()->isPointerTy() &&  typeid(*then_val_ty->ty_) != typeid(type::RecordTy) && !then_val_ty->ty_->IsSameType(type::StringTy::Instance())) {
+    return new tr::ValAndTy(ir_builder->CreateLoad(phi_node->getType()->getPointerElementType(),phi_node),then_val_ty->ty_);
   }
-
   return new tr::ValAndTy(phi_node, then_val_ty->ty_);
 }
 
@@ -1008,7 +988,8 @@ tr::ValAndTy *WhileExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   auto test_val_ty = test_->Translate(venv, tenv, level, errormsg);
   assert(test_val_ty && test_val_ty->ty_);
 
-  llvm::Value* condition = test_val_ty->val_;
+  llvm::Value* test_val = test_val_ty->val_;
+  llvm::Value* condition = ir_builder->CreateICmpNE(test_val, llvm::ConstantInt::get(test_val->getType(), 0), "to_bool");
   auto test_ty = test_val_ty->ty_;
   // std::cout << "test_ty: " << typeid(*test_ty).name() << std::endl;
   ir_builder->CreateCondBr(condition,body_label,done_label);
@@ -1028,15 +1009,10 @@ tr::ValAndTy *ForExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                 tr::Level *level,
                                 err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
-  /* TODO: Put your lab5-part1 code here */
   llvm::Function *func = ir_builder->GetInsertBlock()->getParent();
-
-  llvm::BasicBlock *incre_bb =
-      llvm::BasicBlock::Create(ir_builder->getContext(), "for_incre", func);
-  llvm::BasicBlock *body_bb =
-      llvm::BasicBlock::Create(ir_builder->getContext(), "for_body");
-  llvm::BasicBlock *exit_bb =
-      llvm::BasicBlock::Create(ir_builder->getContext(), "for_exit");
+  llvm::BasicBlock *incre_bb = llvm::BasicBlock::Create(ir_builder->getContext(), "for_incre", func);
+  llvm::BasicBlock *body_bb  = llvm::BasicBlock::Create(ir_builder->getContext(), "for_body");
+  llvm::BasicBlock *exit_bb  = llvm::BasicBlock::Create(ir_builder->getContext(), "for_exit");
 
   loop_stack.push(exit_bb);
 
@@ -1047,66 +1023,43 @@ tr::ValAndTy *ForExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
 
   if (typeid(*lo_) == typeid(VarExp)) {
     auto lo_var_address = lo_val_ty->val_;
-    auto lo_var_ptr = ir_builder->CreateIntToPtr(
-        lo_var_address, lo_val_ty->ty_->GetLLVMType()->getPointerTo());
-    lo_val_ty->val_ = ir_builder->CreateLoad(
-        lo_val_ty->ty_->GetLLVMType(), lo_var_ptr);
+    auto lo_var_ptr = ir_builder->CreateIntToPtr(lo_var_address, lo_val_ty->ty_->GetLLVMType()->getPointerTo());
+    lo_val_ty->val_ = ir_builder->CreateLoad(lo_val_ty->ty_->GetLLVMType(), lo_var_ptr);
   }
   llvm::Value *hi_var_val = hi_val_ty->val_;
   if (typeid(*hi_) == typeid(VarExp)) {
     auto hi_var_address = hi_val_ty->val_;
-    auto hi_var_ptr = ir_builder->CreateIntToPtr(
-        hi_var_address, hi_val_ty->ty_->GetLLVMType()->getPointerTo());
-    hi_var_val = ir_builder->CreateLoad(
-        hi_val_ty->ty_->GetLLVMType(), hi_var_ptr);
+    auto hi_var_ptr = ir_builder->CreateIntToPtr(hi_var_address, hi_val_ty->ty_->GetLLVMType()->getPointerTo());
+    hi_var_val = ir_builder->CreateLoad(hi_val_ty->ty_->GetLLVMType(), hi_var_ptr);
   }
-  if (!lo_val_ty->ty_->IsSameType(type::IntTy::Instance()) ||
-      !hi_val_ty->ty_->IsSameType(type::IntTy::Instance())) {
-    errormsg->Error(pos_, "for exp's range type is not integer");
-    return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
+  if (!lo_val_ty->ty_->IsSameType(type::IntTy::Instance()) || !hi_val_ty->ty_->IsSameType(type::IntTy::Instance())) {
+    assert(false);
   }
 
   venv->BeginScope();
-
-  // temp var for the loop, must be modified.
   frame::Access *access = level->frame_->AllocLocal(lo_val_ty->val_);
-  venv->Enter(var_, new env::VarEntry(new tr::Access(level, access),
-                                      type::IntTy::Instance()));
+  venv->Enter(var_, new env::VarEntry(new tr::Access(level, access),type::IntTy::Instance()));
   auto cond_var_address =  access->get_inframe_address(level->frame_->sp, level->frame_->framesize_global, ir_builder);
   llvm::Value *cond_var_ptr = ir_builder->CreateIntToPtr(
       cond_var_address, lo_val_ty->val_->getType()->getPointerTo());
   ir_builder->CreateStore(lo_val_ty->val_, cond_var_ptr);
   ir_builder->CreateBr(body_bb);
   ir_builder->SetInsertPoint(incre_bb);
-
-  llvm::Value *var_val =
-      ir_builder->CreateLoad(lo_val_ty->ty_->GetLLVMType(), cond_var_ptr);
-
-
-
-  var_val = ir_builder->CreateAdd(
-      var_val, llvm::ConstantInt::get(
-                   llvm::Type::getInt32Ty(ir_builder->getContext()), 1));
+  llvm::Value *var_val = ir_builder->CreateLoad(lo_val_ty->ty_->GetLLVMType(), cond_var_ptr);
+  var_val = ir_builder->CreateAdd(var_val, llvm::ConstantInt::get(llvm::Type::getInt32Ty(ir_builder->getContext()), 1));
   // std::string outfile = "temp.ll";
   // std::error_code EC;
   // llvm::raw_fd_ostream file(outfile, EC);
   // ir_module->print(file, nullptr);
   ir_builder->CreateStore(var_val, cond_var_ptr);
-
   llvm::Value *cond = ir_builder->CreateICmpSLE(var_val, hi_var_val);
-
   ir_builder->CreateCondBr(cond, body_bb, exit_bb);
-
   func->getBasicBlockList().push_back(body_bb);
-
   ir_builder->SetInsertPoint(body_bb);
   body_->Translate(venv, tenv, level, errormsg);
-
   ir_builder->CreateBr(incre_bb);
-
   func->getBasicBlockList().push_back(exit_bb);
   ir_builder->SetInsertPoint(exit_bb);
-
   loop_stack.pop();
   venv->EndScope();
 
@@ -1128,11 +1081,16 @@ tr::ValAndTy *LetExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                 err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
   auto decs_list = this->decs_->GetList();
+  venv->BeginScope();
+  tenv->BeginScope();
   for (auto dec : decs_list) {
     dec->Translate(venv, tenv, level, errormsg);
   }
   // std::cout << "Actual type: " << typeid(*body_).name() << std::endl;
-  return body_->Translate(venv, tenv, level, errormsg);
+  auto res = body_->Translate(venv, tenv, level, errormsg);
+  tenv->EndScope();
+  venv->EndScope();
+  return res;
 }
 
 tr::ValAndTy *ArrayExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
@@ -1140,38 +1098,16 @@ tr::ValAndTy *ArrayExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
                                   err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab5-part1 code here */
   type::Ty *ty = tenv->Look(typ_);
-  if (!ty) {
-    errormsg->Error(pos_, "undefined type %s", typ_->Name().c_str());
-    return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
-  }
-
+  assert(ty);
   if (typeid(*ty) != typeid(type::ArrayTy)) {
-    errormsg->Error(pos_, "type %s is not an array", typ_->Name().c_str());
-    return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
+    assert(false);
   }
 
-  tr::ValAndTy *size_val_ty = size_->Translate(venv, tenv, level, errormsg);
-  if (!size_val_ty->ty_->IsSameType(type::IntTy::Instance())) {
-    errormsg->Error(pos_, "integer required for array size");
-    return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
-  }
+  auto size_val_ty = size_->Translate(venv, tenv, level, errormsg);
+  auto init_val_ty = init_->Translate(venv, tenv, level, errormsg);
 
-  tr::ValAndTy *init_val_ty = init_->Translate(venv, tenv, level, errormsg);
-  if (!init_val_ty->ty_->IsSameType(static_cast<type::ArrayTy *>(ty)->ty_)) {
-    errormsg->Error(pos_, "type mismatch");
-    return new tr::ValAndTy(nullptr, type::VoidTy::Instance());
-  }
   llvm::Value *array_size = size_val_ty->val_;
   llvm::Value *array_init = init_val_ty->val_;
-
-  // if (array_size->getType()->isPointerTy()) {
-  //   array_size = ir_builder->CreateLoad(
-  //       array_size->getType()->getPointerElementType(), array_size);
-  // }
-  // if (array_init->getType()->isPointerTy()) {
-  //   array_init = ir_builder->CreateLoad(
-  //       llvm::Type::getInt64Ty(ir_builder->getContext()), array_init);
-  // }
   if(typeid(*(size_)) == typeid(VarExp)){
     auto arraysize_address = size_val_ty->val_;
     auto arraysize_ptr = ir_builder->CreateIntToPtr(arraysize_address, size_val_ty->ty_->GetLLVMType()->getPointerTo());
@@ -1182,16 +1118,12 @@ tr::ValAndTy *ArrayExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
     auto init_ptr = ir_builder->CreateIntToPtr(init_address, size_val_ty->ty_->GetLLVMType()->getPointerTo());
     array_init = ir_builder->CreateLoad(size_val_ty->ty_->GetLLVMType(),init_ptr);
   }
-  array_init = ir_builder->CreateSExt(
-      array_init, llvm::Type::getInt64Ty(ir_module->getContext()));
-
+  array_init = ir_builder->CreateSExt(array_init, llvm::Type::getInt64Ty(ir_module->getContext()));
   std::vector<llvm::Value *> array_args;
   assert(array_init->getType()->isIntegerTy(64));
   array_args.push_back(array_size);
   array_args.push_back(array_init);
-
   llvm::Value *array_ptr = ir_builder->CreateCall(init_array, array_args,"array_ptr");
-
   // std::string outfile = "temp.ll";
   // std::error_code EC;
   // llvm::raw_fd_ostream file(outfile, EC);

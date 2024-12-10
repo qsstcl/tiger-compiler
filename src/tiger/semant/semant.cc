@@ -346,11 +346,6 @@ type::Ty *VoidExp::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv,
 void FunctionDec::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv,
                              int labelcount, err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab4 code here */
-   //函数声明分为两步
-  //1、将函数原型加入到venv
-  //2、使用新的环境进行类型检查
-
-  //1、将函数原型加入到venv
   std::list<absyn::FunDec *> fun_decs = functions_->GetList();
   auto fun_dec_begin = fun_decs.begin();
   while(fun_dec_begin != fun_decs.end()){
@@ -370,7 +365,6 @@ void FunctionDec::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv,
     venv->Enter((*fun_dec_begin)->name_, new env::FunEntry(formals, result_ty));
     fun_dec_begin ++;
   }
-  //2、使用新的环境进行类型检查
   fun_dec_begin = fun_decs.begin();
   while(fun_dec_begin != fun_decs.end()){
     venv->BeginScope();
@@ -420,7 +414,6 @@ void VarDec::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv, int labelcount,
 void TypeDec::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv, int labelcount,
                          err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab4 code here */
-  //1、检查所有的type，是否有重名，没有的话就插入
   std::list<absyn::NameAndTy *> type_dec_list = types_->GetList();
   auto type_dec_begin = type_dec_list.begin();
   while(type_dec_begin != type_dec_list.end()){
@@ -430,14 +423,12 @@ void TypeDec::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv, int labelcount,
     tenv->Enter((*type_dec_begin)->name_, new type::NameTy((*type_dec_begin)->name_, nullptr));
     type_dec_begin ++;
   }
-  //2、检查所有的NameTy
   type_dec_begin = type_dec_list.begin();
   while(type_dec_begin != type_dec_list.end()){
     type::NameTy* name_ty = reinterpret_cast<type::NameTy *>(tenv->Look((*type_dec_begin)->name_));
     name_ty->ty_ = (*type_dec_begin)->ty_->SemAnalyze(tenv, errormsg);
     type_dec_begin ++;
   }
-  //3、检查是否有递归定义
   bool is_recursive = false;
   type_dec_begin = type_dec_list.begin();
   while(type_dec_begin != type_dec_list.end()){

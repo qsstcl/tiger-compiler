@@ -24,10 +24,10 @@ int main(int argc, char **argv) {
   reg_manager = new frame::X64RegManager();
   frags = new frame::Frags();
 
-  llvm::LLVMContext context;
-  ir_module = new llvm::Module("lightir", context);
+  llvm::LLVMContext *context = new llvm::LLVMContext();
+  ir_module = new llvm::Module("lightir", *context);
   ir_module->setTargetTriple("x86_64-pc-linux-gnu");
-  ir_builder = new llvm::IRBuilder<>(context);
+  ir_builder = new llvm::IRBuilder<>(*context);
 
   if (argc < 2) {
     fprintf(stderr, "usage: tiger-compiler file.tig\n");
