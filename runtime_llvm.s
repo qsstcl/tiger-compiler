@@ -221,6 +221,9 @@ print:                                  # @print
 	movq	%rax, -24(%rbp)
 	jmp	.LBB4_1
 .LBB4_4:
+	movq	stdout@GOTPCREL(%rip), %rax
+	movq	(%rax), %rdi
+	callq	fflush@PLT
 	addq	$32, %rsp
 	popq	%rbp
 	.cfi_def_cfa %rsp, 8
@@ -733,8 +736,8 @@ consts:
 	.addrsig
 	.addrsig_sym malloc
 	.addrsig_sym putchar
-	.addrsig_sym flush
 	.addrsig_sym fflush
+	.addrsig_sym flush
 	.addrsig_sym printf
 	.addrsig_sym tigermain
 	.addrsig_sym exit

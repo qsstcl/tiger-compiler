@@ -430,10 +430,10 @@ tr::ValAndTy *SimpleVar::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   auto frame_access = access->access_;
   if(var_entry->access_->level_ != level){
     auto current_level = level;
-    llvm::Value *var_level_sp = nullptr;
+    llvm::Value *var_level_sp = current_level->get_sp();
     while(current_level != var_entry->access_->level_){
       auto static_link = current_level->frame_->Formals()->front();
-      auto static_link_address = static_link->get_inframe_address(current_level->get_sp(), current_level->frame_->framesize_global, ir_builder);
+      auto static_link_address = static_link->get_inframe_address(var_level_sp, current_level->frame_->framesize_global, ir_builder);
       llvm::Value *static_link_ptr = ir_builder->CreateIntToPtr(static_link_address, ir_builder->getInt64Ty()->getPointerTo());
       llvm::Value *static_link_val = ir_builder->CreateLoad(ir_builder->getInt64Ty(), static_link_ptr);
       var_level_sp = static_link_val;
@@ -790,13 +790,13 @@ tr::ValAndTy *RecordExp::Translate(env::VEnvPtr venv, env::TEnvPtr tenv,
   int index = 0;
   for (auto field : filed_list) {
     auto field_val_ty = field->exp_->Translate(venv, tenv, level, errormsg);
-    llvm::Value *field_val = field_val_ty->val_;
+    llvm::Value *field_exp_val = field_val_ty->val_;
     if (typeid(*field->exp_) == typeid(VarExp)) {
-      auto field_ptr = ir_builder->CreateIntToPtr(field_val, llvm_record_ty->getPointerTo());
-      field_val = ir_builder->CreateLoad(field_val->getType(), field_ptr);
+      auto field_exp_ptr = ir_builder->CreateIntToPtr(field_exp_val, field_val_ty->ty_->GetLLVMType()->getPointerTo());
+      field_exp_val = ir_builder->CreateLoad(field_val_ty->ty_->GetLLVMType(), field_exp_ptr);
     }
     llvm::Value *field_ptr = ir_builder->CreateStructGEP(llvm_record_ty, record_ptr, index, field->name_->Name());
-    ir_builder->CreateStore(field_val, field_ptr);
+    ir_builder->CreateStore(field_exp_val, field_ptr);
     index++;
   }
 

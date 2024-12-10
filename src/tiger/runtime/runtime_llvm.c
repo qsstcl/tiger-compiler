@@ -43,6 +43,7 @@ void print(struct LLVMString *s) {
   int i;
   char *p = s->chars;
   for (i = 0; i < s->length; i++, p++) putchar(*p);
+  fflush(stdout);
 }
 
 
