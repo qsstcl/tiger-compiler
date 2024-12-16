@@ -30,7 +30,6 @@ class Level {
 public:
   frame::Frame *frame_;
   Level *parent_;
-  // llvm::Value *sp;
 
   Level(frame::Frame *frame, Level *parent) : frame_(frame), parent_(parent) {}
 

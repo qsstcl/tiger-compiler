@@ -6,7 +6,9 @@
 #include <string>
 
 #include "tiger/codegen/assem.h"
+#include "tiger/env/env.h"
 #include "tiger/frame/temp.h"
+#include "llvm/IR/GlobalVariable.h"
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
@@ -73,7 +75,7 @@ protected:
 class Access {
 public:
   /* TODO: Put your lab5-part1 code here */
-
+  virtual llvm::Value* get_inframe_address(llvm::Value* sp_value, llvm::GlobalVariable* function_framesize,llvm::IRBuilder<> *ir_builder) = 0;
   virtual ~Access() = default;
 };
 

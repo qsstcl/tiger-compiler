@@ -87,7 +87,7 @@ b:
   %18 = load i64, i64* @b_framesize_global, align 4
   %19 = add i64 %18, 16
   %20 = add i64 %b_sp, %19
-  %b_y_ptr = inttoptr i64 %20 to i32*
+  %b_y_ptr = inttoptr i64 %20 to i32 *
   %21 = load i32, i32* %a_x_ptr, align 4
   %22 = load i32, i32* %b_y_ptr, align 4
   %23 = add i32 %21, %22

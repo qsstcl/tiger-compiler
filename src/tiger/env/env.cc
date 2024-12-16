@@ -1,6 +1,7 @@
 #include "tiger/env/env.h"
 #include "tiger/semant/semant.h"
 #include "tiger/translate/translate.h"
+#include "llvm/IR/DerivedTypes.h"
 
 extern llvm::IRBuilder<> *ir_builder;
 extern llvm::Module *ir_module;
@@ -128,12 +129,24 @@ void ProgTr::FillBaseVEnv() {
 env::FunEntry::FunEntry(tr::Level *level, type::TyList *formals,
                         type::Ty *result, std::string func_name)
     : formals_(formals), result_(result), level_(level) {
+      
   std::vector<llvm::Type *> formals_ty;
+  if(level->parent_ != nullptr){
+    // sp
+    formals_ty.push_back(ir_builder->getInt64Ty());
+    // sl
+    formals_ty.push_back(ir_builder->getInt64Ty());
+  }
   for (auto arg_ty : formals->GetList()) {
     formals_ty.push_back(arg_ty->GetLLVMType());
   }
-  llvm::FunctionType *func_type =
-      llvm::FunctionType::get(result->GetLLVMType(), formals_ty, false);
+  llvm::FunctionType *func_type = nullptr;
+  if(result != nullptr){
+    func_type = llvm::FunctionType::get(result->GetLLVMType(), formals_ty, false);
+  }else{
+    func_type = llvm::FunctionType::get(ir_builder->getVoidTy(), formals_ty, false);
+  }
+  
   llvm::Function *func = llvm::Function::Create(
       func_type, llvm::Function::ExternalLinkage, func_name, ir_module);
   func_type_ = func_type;

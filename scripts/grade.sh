@@ -59,8 +59,10 @@ test_lab3() {
   local testcase_dir=${WORKDIR}/testdata/lab3/testcases
   local ref_dir=${WORKDIR}/testdata/lab3/refs
   local testcase_name
-
+  echo "befor build"
   build test_parse
+  echo "after build"
+
   for testcase in "$testcase_dir"/*.tig; do
     testcase_name=$(basename "$testcase" | cut -f1 -d".")
     local ref=${ref_dir}/${testcase_name}.out
