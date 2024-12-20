@@ -1,2 +1,2 @@
 CompileFlags:
-    Add: ["-std=c++17","-I/usr/include/llvm-14","-I/usr/include/llvm-c-14","-I/home/stu/tiger-compiler/compilers-2024/src"]
+    Add: ["-std=c++17","-I/usr/include/llvm-14","-I/usr/include/llvm-c-14","-I/home/stu/compilers-2024/src"]

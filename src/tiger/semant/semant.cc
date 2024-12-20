@@ -125,9 +125,6 @@ type::Ty *CallExp::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv,
 type::Ty *OpExp::SemAnalyze(env::VEnvPtr venv, env::TEnvPtr tenv,
                             int labelcount, err::ErrorMsg *errormsg) const {
   /* TODO: Put your lab4 code here */
-
-  //AcutalTy函数仅仅对于NameTy去找到这个类型别名的真正类型
-  //获取OP表达式二元各自的类型
   type::Ty * left_ty = left_->SemAnalyze(venv,tenv,labelcount,errormsg);
   type::Ty * right_ty = right_->SemAnalyze(venv,tenv,labelcount,errormsg);
   //如果是加减乘除的操作，左右都必须为int类型

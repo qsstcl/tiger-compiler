@@ -168,8 +168,8 @@ class Interpreter(object):
 
     def run(self):
         pc = self._state_table.get_pc()
-        while pc >= 0:
+        while pc >= 0: 
+            # print(self._instructions[pc])
             self._instructions[pc].execute(self._state_table)
-            
             pc = self._state_table.get_pc()
 
