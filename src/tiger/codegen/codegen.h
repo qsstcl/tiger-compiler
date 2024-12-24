@@ -4,6 +4,7 @@
 #include "tiger/canon/canon.h"
 #include "tiger/codegen/assem.h"
 #include "tiger/frame/x64frame.h"
+#include <cassert>
 
 // Forward Declarations
 namespace frame {
@@ -45,6 +46,14 @@ public:
   // check if the value is %sp in llvm
   bool IsRsp(llvm::Value *val, std::string_view function_name) const {
     // TODO: your lab5 code here
+    if(!val->hasName()){
+      return false;
+    }
+    auto val_name = val->getName().str();
+    auto func_str_name = function_name.data() + std::string("_sp");
+    if(val_name == func_str_name){
+      return true;
+    }
     return false;
   }
 

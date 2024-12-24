@@ -1,5 +1,9 @@
 #include "tiger/frame/x64frame.h"
+#include "tiger/codegen/assem.h"
 #include "tiger/env/env.h"
+#include "tiger/frame/frame.h"
+#include "tiger/frame/temp.h"
+#include "llvm/IR/GlobalVariable.h"
 
 #include <iostream>
 #include <llvm/IR/Function.h>
@@ -8,6 +12,8 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
+#include <string>
+#include <vector>
 
 extern frame::RegManager *reg_manager;
 extern llvm::IRBuilder<> *ir_builder;
@@ -87,6 +93,13 @@ public:
       : offset(offset), parent_frame(parent) {}
 
   /* TODO: Put your lab5-part1 code here */
+  llvm::Value* get_inframe_address(llvm::Value* sp_value, llvm::GlobalVariable* function_framesize,llvm::IRBuilder<> *ir_builder) {
+    llvm::Value* offset_value = llvm::ConstantInt::get(ir_builder->getInt64Ty(), offset);
+    llvm::Value* framesize_value = ir_builder->CreateLoad(ir_builder->getInt64Ty(), function_framesize);
+    llvm::Value* stack_top_address = ir_builder->CreateAdd(sp_value, framesize_value);
+    llvm::Value* var_address = ir_builder->CreateAdd(stack_top_address, offset_value);
+    return var_address;
+  }
 };
 
 class X64Frame : public Frame {
@@ -104,7 +117,6 @@ public:
 
     offset_ -= reg_manager->WordSize();
     access = new InFrameAccess(offset_, this);
-
     return access;
   }
   void AllocOutgoSpace(int size) override {
@@ -115,6 +127,21 @@ public:
 
 frame::Frame *NewFrame(temp::Label *name, std::list<bool> formals) {
   /* TODO: Put your lab5-part1 code here */
+  auto *formals_list = new std::list<frame::Access *>();
+  auto *frame = new X64Frame(name, formals_list);
+  frame->framesize_global = new llvm::GlobalVariable(
+      *ir_module, llvm::Type::getInt64Ty(ir_builder->getContext()), false,
+      llvm::GlobalValue::ExternalLinkage, nullptr, name->Name() + "_framesize");
+  auto offset = 8;
+  //static link
+  auto * static_link_access = new InFrameAccess(offset, frame);
+  formals_list->push_back(static_link_access);
+  for (auto formal : formals) {
+    offset += 8;
+    auto *access = new InFrameAccess(offset, frame);
+    formals_list->push_back(access);
+  }
+  return frame;
 }
 
 /**
@@ -124,9 +151,35 @@ frame::Frame *NewFrame(temp::Label *name, std::list<bool> formals) {
  * @param stm statements
  * @return statements with saving, restoring and view shift
  */
+//完成ppt任务中的5、 8
+//5、Store instructions to save any callee-saved registers- including the return address register – used within the function
+//8、Load instructions to restore the callee-save registers
 assem::InstrList *ProcEntryExit1(std::string_view function_name,
                                  assem::InstrList *body) {
   // TODO: your lab5 code here
+  std::vector<temp::Temp *> new_temps;
+  auto *callee_saves = reg_manager->CalleeSaves();
+  for(auto *temp : callee_saves->GetList()){
+    new_temps.push_back(temp::TempFactory::NewTemp());
+    body->Insert(body->GetList().begin(), new assem::MoveInstr(
+      "movq `s0, `d0", 
+      new temp::TempList(new_temps.back()), 
+      new temp::TempList(temp)));
+  }
+
+  body->Append(new assem::LabelInstr(std::string(function_name)+"_end"));
+
+  std::vector<temp::Temp *> callee_reg;
+  for(auto *temp : callee_saves->GetList()){
+    callee_reg.push_back(temp);
+  }
+  for(auto * temp: callee_reg){
+    body->Append(new assem::MoveInstr(
+      "movq `s0, `d0",
+      new temp::TempList(temp),
+      new temp::TempList(new_temps.front())));
+    new_temps.erase(new_temps.begin());
+  }
   return body;
 }
 
@@ -136,6 +189,8 @@ assem::InstrList *ProcEntryExit1(std::string_view function_name,
  * @param body function body
  * @return instructions with sink instruction
  */
+//For register allocation, detect live registers when exit function
+
 assem::InstrList *ProcEntryExit2(assem::InstrList *body) {
   body->Append(new assem::OperInstr("", new temp::TempList(),
                                     reg_manager->ReturnSink(), nullptr));
@@ -148,12 +203,53 @@ assem::InstrList *ProcEntryExit2(assem::InstrList *body) {
  * @param body current function body
  * @return whole instruction list with prolog_ end epilog_
  */
+ //完成ppt中的proc任务 1,2,3,9,10,11
+//1、Pseudo-instructions to announce the beginning of a function;
+//2、A label definition of the function name
+//3、An instruction to adjust the stack pointer.
+//9、An instruction to reset the stack pointer (to deallocate the frame)
+//10、A return instruction (Jump to the return address)
+//11、Pseudo-instructions to announce the end of a function
 assem::Proc *ProcEntryExit3(std::string_view function_name,
                             assem::InstrList *body) {
   std::string prologue = "";
   std::string epilogue = "";
-
   // TODO: your lab5 code here
+
+  temp::Temp *rax = reg_manager->GetRegister(X64RegManager::Reg::RAX);
+  temp::Temp *rsp = reg_manager->GetRegister(X64RegManager::Reg::RSP);
+  temp::Temp *rdi = reg_manager->GetRegister(X64RegManager::Reg::RDI);
+  body->Insert(body->GetList().begin(),new assem::OperInstr(
+    "subq `s0, `d0",
+    new temp::TempList(rsp),
+    new temp::TempList({rax, rsp}),
+    nullptr
+  ));
+  std::string func_name = std::string(function_name);
+  std::string global_frame_name = func_name + "_framesize_global";
+  body->Insert(body->GetList().begin(),new assem::OperInstr(
+              "movq " + global_frame_name + "(%rip), `d0",
+              new temp::TempList(rax),
+              nullptr,
+              nullptr));
+  body->Insert(body->GetList().begin(), new assem::LabelInstr(
+              std::string(function_name))); 
+
+  body->Append(new assem::OperInstr(
+              "movq " + global_frame_name + "(%rip), `d0",
+              new temp::TempList(rdi),
+              nullptr,
+              nullptr));
+  body->Append(new assem::OperInstr(
+              "addq `s0, `d0",
+              new temp::TempList(rsp),
+              new temp::TempList({rdi, rsp}),
+              nullptr));
+  body->Append(new assem::OperInstr(
+              "retq",
+              new temp::TempList(rsp),
+              nullptr,
+              nullptr));
   return new assem::Proc(prologue, body, epilogue);
 }
 

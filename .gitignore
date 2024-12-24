@@ -32,7 +32,7 @@ _deps
 # Mac
 .DS_Store
 *.log
-
+.cache
 # llvm source
 testdata/lab5or6/testcases/*.ll
 
