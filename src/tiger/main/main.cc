@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
       file.close();
     }
 
-    if (errormsg->AnyErrors())
+  if (errormsg->AnyErrors())
       return 1; // Don't continue if error occurrs
   } else {
     fname = fname.substr(0, fname.find(".ll"));

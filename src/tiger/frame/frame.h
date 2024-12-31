@@ -60,6 +60,11 @@ public:
   [[nodiscard]] virtual temp::TempList *ReturnSink() = 0;
 
   /**
+   * Get RSP register
+   */
+  [[nodiscard]] virtual temp::Temp *Rsp() = 0;
+
+  /**
    * Get word size
    */
   [[nodiscard]] virtual int WordSize() = 0;

@@ -80,6 +80,8 @@ temp::TempList *X64RegManager::ReturnSink() {
   return temp_list;
 }
 
+temp::Temp *X64RegManager::Rsp() { return regs_[SP]; }
+
 int X64RegManager::WordSize() { return 8; }
 
 temp::Temp *X64RegManager::FramePointer() { return regs_[FP]; }
@@ -190,7 +192,6 @@ assem::InstrList *ProcEntryExit1(std::string_view function_name,
  * @return instructions with sink instruction
  */
 //For register allocation, detect live registers when exit function
-
 assem::InstrList *ProcEntryExit2(assem::InstrList *body) {
   body->Append(new assem::OperInstr("", new temp::TempList(),
                                     reg_manager->ReturnSink(), nullptr));

@@ -151,6 +151,7 @@ void ProcFrag::OutputAssem(FILE *out, OutputPhase phase, bool need_ra) const {
   assem::InstrList *il = assem_instr.get()->GetInstrList();
 
   if (need_ra) {
+    
     // Lab 6: register allocation
     TigerLog("----====Register allocate====-----\n");
     ra::RegAllocator reg_allocator(body_->getName().str(),

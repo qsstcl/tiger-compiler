@@ -76,7 +76,23 @@ public:
   TempList *Diff(temp::TempList *tl) const;
   [[nodiscard]] Temp *NthTemp(int i) const;
   [[nodiscard]] const std::list<Temp *> &GetList() const { return temp_list_; }
-
+  
+  static TempList* RewriteTempList(TempList* s1, Temp* _old, Temp* _new){
+    auto res = new TempList();
+    if(s1 == nullptr){
+      return res;
+    }
+    auto s1_list = s1->GetList();
+    for(auto s1_temp : s1_list){
+      if(s1_temp == _old){
+        res->Append(_new);
+      }
+      else{
+        res->Append(s1_temp);
+      }
+    }
+    return res;
+  }
 private:
   std::list<Temp *> temp_list_;
 };
