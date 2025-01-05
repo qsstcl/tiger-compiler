@@ -248,7 +248,7 @@ assem::Proc *ProcEntryExit3(std::string_view function_name,
               nullptr));
   body->Append(new assem::OperInstr(
               "retq",
-              new temp::TempList(rsp),
+              nullptr,
               nullptr,
               nullptr));
   return new assem::Proc(prologue, body, epilogue);

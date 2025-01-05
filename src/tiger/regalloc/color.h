@@ -22,7 +22,7 @@ public:
   assem::InstrList* instr_list;
   fg::FlowGraphFactory* flow_fac;
   live::LiveGraphFactory* live_fac;
-  live::IGraphPtr ig;
+  live::IGraphPtr interference_graph;
 
   live::INodeListPtr precolored;
   live::INodeListPtr simplifyWorklist;

@@ -37,8 +37,6 @@ std::unique_ptr<ra::Result> RegAllocator::TransferResult(){
     auto res = std::make_unique<ra::Result>();
     res->coloring_ = coloring_;
     
-    //! We haven't delete those coallesced move instr,
-    //! we choose to delete them here
     auto delete_move_list = new assem::InstrList();
     for(auto instr_it = assem_instr_->GetInstrList()->GetList().begin();instr_it != assem_instr_->GetInstrList()->GetList().end();++instr_it){
         if(typeid(*(*instr_it)) == typeid(assem::MoveInstr)){
@@ -58,147 +56,81 @@ std::unique_ptr<ra::Result> RegAllocator::TransferResult(){
     res->il_ = assem_instr_->GetInstrList();
     return std::move(res);
 }
-
-void RegAllocator::RewriteProgram(live::INodeListPtr spilledNodes){
+void RegAllocator::RewriteProgram(live::INodeListPtr spilledNodes) {
     auto spilled_list = spilledNodes->GetList();
-    auto frame_offset = frame_info_map[frame_name_].first;
-    auto frame_size = frame_info_map[frame_name_].second;
-    for(auto v : spilled_list){
+    auto& frame_info = frame_info_map[frame_name_];
+    auto& frame_offset = frame_info.first;
+    auto& frame_size = frame_info.second;
+
+    for (auto v : spilled_list) {
         auto v_temp = v->NodeInfo();
         frame_offset -= 8;
         frame_size += 8;
         auto v_access = frame_offset;
-        //! Attention: This place could not use instr_list, must use assem_instr_->GetInstrList()->GetList()
-        //! Initially, I think these two are the same because 'GetList()' will return a 'list&'
-        //! But actually it seems not the same. Maybe I will work out the reason later.
-        //auto instr_list = assem_instr_->GetInstrList()->GetList();
-        for(auto instr_it = assem_instr_->GetInstrList()->GetList().begin();instr_it != assem_instr_->GetInstrList()->GetList().end();++instr_it){
-            //! Attention: Be careful about iterator. This place should use 2 '*' to get the instance
-            if(typeid(*(*instr_it)) == typeid(assem::OperInstr)){
-                auto oper_instr = static_cast<assem::OperInstr*>(*instr_it);
-                // If in use
-                auto instr_use = oper_instr->Use();
-                if(instr_use != nullptr){
-                    auto use_list = instr_use->GetList();
-                    bool is_exist = false;
-                    for(auto use : use_list){
-                        if(use == v_temp){
-                            is_exist = true;
-                            break;
-                        }
-                    }
-                    if(is_exist){
-                        auto replace_temp = temp::TempFactory::NewTemp();
-                        oper_instr->src_ = temp::TempList::RewriteTempList(instr_use, v_temp, replace_temp);
-                        // insert new instruction
-                        std::string instr_assem = "movq (" + frame_name_ + "_framesize" + std::to_string(v_access) + ")(`s0), `d0";
-                        auto src_list = new temp::TempList();
-                        auto dst_list = new temp::TempList();
-                        src_list->Append(reg_manager->Rsp());
-                        dst_list->Append(replace_temp);
-                        assem::Instr* new_instr = new assem::OperInstr(
-                            instr_assem,
-                            dst_list,
-                            src_list,
-                            nullptr
-                        );
-                        assem_instr_->GetInstrList()->Insert(instr_it, new_instr);
-                    }
-                }
 
-                // If in def
-                auto instr_def = oper_instr->Def();
-                if(instr_def != nullptr){
-                    auto def_list = instr_def->GetList();
-                    bool is_exist = false;
-                    for(auto def : def_list){
-                        if(def == v_temp){
-                            is_exist = true;
-                            break;
-                        }
-                    }
-                    if(is_exist){
-                        auto replace_temp = temp::TempFactory::NewTemp();
-                        oper_instr->dst_ = temp::TempList::RewriteTempList(instr_def, v_temp, replace_temp);
-                        std::string instr_assem = "movq `s0, (" + frame_name_ + "_framesize" + std::to_string(v_access) + ")(`s1)";
-                        auto src_list = new temp::TempList();
-                        src_list->Append(replace_temp);
-                        src_list->Append(reg_manager->Rsp());
-                        assem::Instr* new_instr = new assem::OperInstr(
-                            instr_assem,
-                            nullptr,
-                            src_list,
-                            nullptr
-                        );
-                        assem_instr_->GetInstrList()->Insert(std::next(instr_it), new_instr);
-                        //!attention: skip next new instr
-                        ++instr_it;
-                    }
-                }
-            }
-            else if(typeid(*(*instr_it)) == typeid(assem::MoveInstr)){
-                auto move_instr = static_cast<assem::MoveInstr*>(*instr_it);
-                // If in use
-                auto instr_use = move_instr->Use();
-                if(instr_use != nullptr){
-                    auto use_list = instr_use->GetList();
-                    bool is_exist = false;
-                    for(auto use : use_list){
-                        if(use == v_temp){
-                            is_exist = true;
-                            break;
-                        }
-                    }
-                    if(is_exist){
-                        auto replace_temp = temp::TempFactory::NewTemp();
-                        move_instr->src_ = temp::TempList::RewriteTempList(instr_use, v_temp, replace_temp);
-                        // insert new instruction
-                        std::string instr_assem = "movq (" + frame_name_ + "_framesize" + std::to_string(v_access) + ")(`s0), `d0";
-                        auto src_list = new temp::TempList();
-                        auto dst_list = new temp::TempList();
-                        src_list->Append(reg_manager->Rsp());
-                        dst_list->Append(replace_temp);
-                        assem::Instr* new_instr = new assem::OperInstr(
-                            instr_assem,
-                            dst_list,
-                            src_list,
-                            nullptr
-                        );
-                        assem_instr_->GetInstrList()->Insert(instr_it, new_instr);
-                    }
-                }
+        RewriteInstructions(v_temp, v_access);
+    }
 
-                // If in def
-                auto instr_def = move_instr->Def();
-                if(instr_def != nullptr){
-                    auto def_list = instr_def->GetList();
-                    bool is_exist = false;
-                    for(auto def : def_list){
-                        if(def == v_temp){
-                            is_exist = true;
-                            break;
-                        }
-                    }
-                    if(is_exist){
-                        auto replace_temp = temp::TempFactory::NewTemp();
-                        move_instr->dst_ = temp::TempList::RewriteTempList(instr_def, v_temp, replace_temp);
-                        std::string instr_assem = "movq `s0, (" + frame_name_ + "_framesize" + std::to_string(v_access) + ")(`s1)";
-                        auto src_list = new temp::TempList();
-                        src_list->Append(replace_temp);
-                        src_list->Append(reg_manager->Rsp());
-                        assem::Instr* new_instr = new assem::OperInstr(
-                            instr_assem,
-                            nullptr,
-                            src_list,
-                            nullptr
-                        );
-                        assem_instr_->GetInstrList()->Insert(std::next(instr_it), new_instr);
-                        //!attention: skip next new instr
-                        ++instr_it;
-                    }
-                }
+    frame_info = std::make_pair(frame_offset, frame_size);
+}
+
+void RegAllocator::RewriteInstructions(temp::Temp* v_temp, int v_access) {
+    for (auto instr_it = assem_instr_->GetInstrList()->GetList().begin();
+         instr_it != assem_instr_->GetInstrList()->GetList().end();
+         ++instr_it) {
+        if (auto oper_instr = dynamic_cast<assem::OperInstr*>(*instr_it)) {
+            RewriteOperInstr(oper_instr, v_temp, v_access, instr_it);
+        } else if (auto move_instr = dynamic_cast<assem::MoveInstr*>(*instr_it)) {
+            RewriteMoveInstr(move_instr, v_temp, v_access, instr_it);
+        }
+    }
+}
+
+void RegAllocator::RewriteOperInstr(assem::OperInstr* oper_instr, temp::Temp* v_temp, int v_access, std::list<assem::Instr *>::const_iterator instr_it) {
+    RewriteUseDef(oper_instr->Use(), oper_instr->src_, v_temp, v_access, instr_it, true);
+    RewriteUseDef(oper_instr->Def(), oper_instr->dst_, v_temp, v_access, instr_it, false);
+}
+
+void RegAllocator::RewriteMoveInstr(assem::MoveInstr* move_instr, temp::Temp* v_temp, int v_access, std::list<assem::Instr *>::const_iterator instr_it) {
+    RewriteUseDef(move_instr->Use(), move_instr->src_, v_temp, v_access, instr_it, true);
+    RewriteUseDef(move_instr->Def(), move_instr->dst_, v_temp, v_access, instr_it, false);
+}
+
+void RegAllocator::RewriteUseDef(temp::TempList* use_def_list, temp::TempList*& src_dst_list, temp::Temp* v_temp, int v_access, std::list<assem::Instr *>::const_iterator instr_it, bool is_use) {
+    if (use_def_list != nullptr) {
+        auto temp_list = use_def_list->GetList();
+        if (std::find(temp_list.begin(), temp_list.end(), v_temp) != temp_list.end()) {
+            auto replace_temp = temp::TempFactory::NewTemp();
+            src_dst_list = temp::TempList::RewriteTempList(use_def_list, v_temp, replace_temp);
+
+            std::string instr_assem = is_use ?
+                "movq (" + frame_name_ + "_framesize_local" + std::to_string(v_access) + ")(`s0), `d0" :
+                "movq `s0, (" + frame_name_ + "_framesize_local" + std::to_string(v_access) + ")(`s1)";
+
+            auto src_list = new temp::TempList();
+            auto dst_list = is_use ? new temp::TempList() : nullptr;
+
+            if (is_use) {
+                src_list->Append(reg_manager->Rsp());
+                dst_list->Append(replace_temp);
+            } else {
+                src_list->Append(replace_temp);
+                src_list->Append(reg_manager->Rsp());
             }
 
+            assem::Instr* new_instr = new assem::OperInstr(
+                instr_assem,
+                dst_list,
+                src_list,
+                nullptr
+            );
+
+            if (is_use) {
+                assem_instr_->GetInstrList()->Insert(instr_it, new_instr);
+            } else {
+                assem_instr_->GetInstrList()->Insert(std::next(instr_it), new_instr);
+                ++instr_it; // Skip the newly inserted instruction
+            }
         }
     }
 }

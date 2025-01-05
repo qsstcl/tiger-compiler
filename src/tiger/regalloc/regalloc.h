@@ -38,6 +38,11 @@ public:
   ~RegAllocator();
   void RegAlloc();
   std::unique_ptr<ra::Result> TransferResult();
+  void RewriteInstructions(temp::Temp* v_temp, int v_access);
+  void RewriteOperInstr(assem::OperInstr* oper_instr, temp::Temp* v_temp, int v_access, std::list<assem::Instr *>::const_iterator instr_it);
+  void RewriteMoveInstr(assem::MoveInstr* move_instr, temp::Temp* v_temp, int v_access, std::list<assem::Instr *>::const_iterator instr_it);
+  void RewriteUseDef(temp::TempList* use_def_list, temp::TempList*& src_dst_list, temp::Temp* v_temp, int v_access, std::list<assem::Instr *>::const_iterator instr_it, bool is_use);
+  
   void RewriteProgram(live::INodeListPtr spilledNodes);
 };
 

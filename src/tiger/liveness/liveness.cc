@@ -1,5 +1,5 @@
 #include "tiger/liveness/liveness.h"
-
+#include <unordered_set>
 extern frame::RegManager *reg_manager;
 
 namespace live {
@@ -43,243 +43,212 @@ MoveList *MoveList::Intersect(MoveList *list) {
   return res;
 }
 
-
-/**
- * in[n] <- use[n] U (out[n] - def[n])
-*/
-temp::TempList* LiveGraphFactory::CalculateNewIn(temp::TempList* use, temp::TempList* old_out, temp::TempList* def){
+temp::TempList* LiveGraphFactory::CalculateNewIn(temp::TempList* use, temp::TempList* old_out, temp::TempList* def) {
   auto res = new temp::TempList();
-  temp::TempList old_def;
-  if(old_out != nullptr){
+  std::unordered_set<temp::Temp*> result_set;
+
+  // Step 1: Add `old_out - def` to `res`
+  if (old_out) {
     auto old_out_list = old_out->GetList();
-    if(def != nullptr){
-      for(auto old_it = old_out_list.begin();old_it != old_out_list.end();++old_it){
-        bool is_in_def = false;
-        auto def_list = def->GetList();
-        for(auto def_it = def_list.begin();def_it != def_list.end();++def_it){
-          if((*def_it) == (*old_it)){
-            is_in_def = true;
-            break;
-          }
-        }
-        if(is_in_def == false){
-          old_def.Append(*old_it);
-        }
-      }
-    }
-    else{
-      for(auto old_it = old_out_list.begin();old_it != old_out_list.end();++old_it){
-        old_def.Append(*old_it);
-      }
-    }
-  }
-  auto old_def_list = old_def.GetList();
-  for(auto it = old_def_list.begin();it != old_def_list.end();++it){
-    res->Append(*it);
-  }
-  if(use != nullptr){
-    auto res_list = res->GetList();
-    auto use_list = use->GetList();
-    for(auto use_it = use_list.begin();use_it != use_list.end();++use_it){
-      bool is_exist = false;
-      for(auto res_it = res_list.begin();res_it != res_list.end();++res_it){
-        if(*use_it == *res_it){
-          is_exist = true;
-          break;
-        }
-      }
-      if(!is_exist){
-        res->Append(*use_it);
-      }
-    }
-  }
-  
-  return res;
-}
+    std::unordered_set<temp::Temp*> def_set;
 
-/**
- * out[n] <- U(s belong to succ[n]) in[s]
-*/
-temp::TempList* LiveGraphFactory::CalculateNewOut(fg::FNodePtr n){
-  auto res = new temp::TempList();
-  auto succ_list = n->Succ();
-  auto succ_node_list = succ_list->GetList();
-  for(auto node_it = succ_node_list.begin();node_it != succ_node_list.end();++node_it){
-    auto succ_in = in_->Look(*node_it);
-    if(succ_in == nullptr){
-      // error
-    }
-    auto succ_in_list = succ_in->GetList();
-    auto res_list = res->GetList();
-    for(auto succ_it = succ_in_list.begin();succ_it != succ_in_list.end();++succ_it){
-      bool is_exist = false;
-      for(auto res_it = res_list.begin();res_it != res_list.end();++res_it){
-        if(*res_it == *succ_it){
-          is_exist = true;
-          break;
-        }
+    if (def) {
+      for (auto def_temp : def->GetList()) {
+        def_set.insert(def_temp);
       }
-      if(!is_exist){
-        res->Append(*succ_it);
+    }
+
+    for (auto old_temp : old_out_list) {
+      if (def_set.find(old_temp) == def_set.end()) {
+        res->Append(old_temp);
+        result_set.insert(old_temp);
+      }
+    }
+  }
+
+  // Step 2: Add `use` to `res` if not already present
+  if (use) {
+    for (auto use_temp : use->GetList()) {
+      if (result_set.find(use_temp) == result_set.end()) {
+        res->Append(use_temp);
+        result_set.insert(use_temp);
       }
     }
   }
 
   return res;
 }
+temp::TempList* LiveGraphFactory::CalculateNewOut(fg::FNodePtr n) {
+    auto res = new temp::TempList();
 
-/** Maintain a data structure that remembers
- * what is live at the exit of each flow-graph node.
- * This function will create this data structure.
-*/
+    // Helper lambda to check if a Temp is already in a TempList
+    auto contains = [](temp::TempList* list, temp::Temp* temp) -> bool {
+        if (list == nullptr) return false;
+        for (auto item : list->GetList()) {
+            if (item == temp) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Iterate over successors
+    for (auto succ_node : n->Succ()->GetList()) {
+        auto succ_in = in_->Look(succ_node);
+        if (succ_in == nullptr) {
+            // Handle error case (e.g., assertion or logging)
+            assert(false && "Successor node's IN set is null.");
+            continue;
+        }
+
+        // Add unique elements from succ_in to res
+        for (auto succ_temp : succ_in->GetList()) {
+            if (!contains(res, succ_temp)) {
+                res->Append(succ_temp);
+            }
+        }
+    }
+
+    return res;
+}
 void LiveGraphFactory::LiveMap() {
-  /* TODO: Put your lab6 code here */
-  auto instr_node_list = flowgraph_->Nodes()->GetList();
-  for(const auto &instr_node : instr_node_list){
-    in_->Enter(instr_node, new temp::TempList());
-    out_->Enter(instr_node, new temp::TempList());
+  for (const auto& instr_node : flowgraph_->Nodes()->GetList()) {
+      in_->Enter(instr_node, new temp::TempList());
+      out_->Enter(instr_node, new temp::TempList());
   }
-  while(true){
-    bool is_same = true;
-    for(const auto &instr_node : instr_node_list){
-      auto node_in = in_->Look(instr_node);
-      auto node_out = out_->Look(instr_node);
-      if(node_in == nullptr || node_out == nullptr){
-        // error
-        return;
-      }
-      int old_in_set_size = node_in->GetList().size();
-      int old_out_set_size = node_out->GetList().size();
+  bool has_changes;
+  do
+  {
+    has_changes = false;
 
-      auto instr = instr_node->NodeInfo();
-      auto instr_use = instr->Use();
-      auto instr_def = instr->Def();
-      auto new_in = CalculateNewIn(instr_use, node_out, instr_def);
-      in_->Set(instr_node, new_in);
-      delete node_in;
+    for (const auto& instr_node : flowgraph_->Nodes()->GetList()) {
+      auto old_in = in_->Look(instr_node);
+      auto old_out = out_->Look(instr_node);
+
+      if (!old_in || !old_out) {
+          assert(false && "Node's IN or OUT set is null.");
+          return;
+      }
+
+      auto new_in = CalculateNewIn(instr_node->NodeInfo()->Use(), old_out, instr_node->NodeInfo()->Def());
       auto new_out = CalculateNewOut(instr_node);
-      out_->Set(instr_node, new_out);
-      delete node_out;
 
-      /**
-       * We should notice that every node's in_set
-       * and out_set will only increase element!
-       * Once an element is put in, it will never
-       * be kicked out! So we can only detect the size of 
-       * in and out is changed or not to decide
-       * whether any change is made.
-      */
-      if(new_in->GetList().size() > old_in_set_size || new_out->GetList().size() > old_out_set_size){
-        is_same = false;
+      if (new_in->GetList().size() != old_in->GetList().size() ||
+          new_out->GetList().size() != old_out->GetList().size()) {
+          has_changes = true;
       }
+
+      in_->Set(instr_node, new_in);
+      out_->Set(instr_node, new_out);
+
+      delete old_in;
+      delete old_out;
     }
-    if(is_same){
-      break;
-    }
+  } while (has_changes);
+}
+
+// 辅助函数：添加冲突边
+void LiveGraphFactory::AddInterferenceEdge(temp::Temp* t1, temp::Temp* t2) {
+  auto node1 = temp_node_map_->Look(t1);
+  auto node2 = temp_node_map_->Look(t2);
+  assert(node1 && node2 && "Node lookup failed.");
+  live_graph_.interf_graph->AddEdge(node1, node2);
+  live_graph_.interf_graph->AddEdge(node2, node1);
+}
+
+// 辅助函数：添加移动指令边
+void LiveGraphFactory::AddMoveEdges(temp::Temp* def, temp::TempList* use_set) {
+  for (auto use : use_set->GetList()) {
+      if (use == reg_manager->Rsp()) {
+          continue;
+      }
+      auto def_node = temp_node_map_->Look(def);
+      auto use_node = temp_node_map_->Look(use);
+      if (!live_graph_.moves->Contain(def_node, use_node) && 
+          !live_graph_.moves->Contain(use_node, def_node)) {
+          live_graph_.moves->Append(def_node, use_node);
+      }
   }
 }
 
 void LiveGraphFactory::InterfGraph() {
-  /* TODO: Put your lab6 code here */
-  auto registers = reg_manager->Registers();
-  auto reg_list = registers->GetList();
-  // precolored nodes
-  for(auto reg : reg_list){
+  for (auto reg : reg_manager->Registers()->GetList()) {
     auto reg_node = live_graph_.interf_graph->NewNode(reg);
     temp_node_map_->Enter(reg, reg_node);
   }
-  for(auto reg1 : reg_list){
-    for(auto reg2 : reg_list){
-      if(reg1 != reg2){
+
+  const auto& reg_list = reg_manager->Registers()->GetList();
+  for (auto reg1 : reg_list) {
+    for (auto reg2 : reg_list) {
+      if (reg1 != reg2) {
         auto node1 = temp_node_map_->Look(reg1);
         auto node2 = temp_node_map_->Look(reg2);
-        if(node1 == nullptr || node2 == nullptr){
-          // error
-          return;
-        }
+        assert(node1 && node2 && "Precolored node lookup failed.");
         live_graph_.interf_graph->AddEdge(node1, node2);
       }
     }
   }
-  
-  // add all temp node into graph
-  auto instr_node_list = flowgraph_->Nodes()->GetList();
-  for(auto instr_node : instr_node_list){
+
+  for (auto instr_node : flowgraph_->Nodes()->GetList()) {
     auto out_set = out_->Look(instr_node);
     auto def_set = instr_node->NodeInfo()->Def();
     auto out_union_def = out_set->Union(def_set);
-    auto temp_list = out_union_def->GetList();
-    for(auto temp : temp_list){
-      if(temp == reg_manager->Rsp()){
-        // We shouldn't add %rsp into graph
-        continue;
-      }
-      if(temp_node_map_->Look(temp) == nullptr){
-        auto temp_node = live_graph_.interf_graph->NewNode(temp);
-        temp_node_map_->Enter(temp, temp_node);
-      }
+
+    for (auto temp : out_union_def->GetList()) {
+        if (temp == reg_manager->Rsp()) {
+            continue; // 不将 %rsp 加入图中
+        }
+        if (!temp_node_map_->Look(temp)) {
+            auto temp_node = live_graph_.interf_graph->NewNode(temp);
+            temp_node_map_->Enter(temp, temp_node);
+        }
     }
     delete out_union_def;
   }
 
-  for(auto instr_node : instr_node_list){
+  for (auto instr_node : flowgraph_->Nodes()->GetList()) {
     auto instr_info = instr_node->NodeInfo();
     auto out_set = out_->Look(instr_node);
-    if(typeid(*instr_info) == typeid(assem::MoveInstr)){
+
+    if (typeid(*instr_info) == typeid(assem::MoveInstr)) {
       auto use_set = instr_info->Use();
       auto def_set = instr_info->Def();
       auto out_diff_use = out_set->Diff(use_set);
-      auto out_diff_use_list = out_diff_use->GetList();
-      if(def_set != nullptr){
-        auto def_list = def_set->GetList();
-        for(auto def : def_list){
-          if(def == reg_manager->Rsp()){
-            continue;
-          }
-          for(auto live : out_diff_use_list){
-            if(live == reg_manager->Rsp()){
+
+      for (auto def : def_set->GetList()) {
+          if (def == reg_manager->Rsp()) {
               continue;
-            }
-            live_graph_.interf_graph->AddEdge(temp_node_map_->Look(def), temp_node_map_->Look(live));
-            live_graph_.interf_graph->AddEdge(temp_node_map_->Look(live), temp_node_map_->Look(def));
           }
-          if(use_set != nullptr){
-            auto use_list = use_set->GetList();
-            for(auto use : use_list){
-              if(use == reg_manager->Rsp()){
-                continue;
+          for (auto live : out_diff_use->GetList()) {
+              if (live == reg_manager->Rsp()) {
+                  continue;
               }
-              if(!live_graph_.moves->Contain(temp_node_map_->Look(use), temp_node_map_->Look(def)) && !live_graph_.moves->Contain(temp_node_map_->Look(def), temp_node_map_->Look(use))){
-                live_graph_.moves->Append(temp_node_map_->Look(def), temp_node_map_->Look(use));
-              }
-            }
+              AddInterferenceEdge(def, live);
           }
-        }
+          AddMoveEdges(def, use_set);
       }
       delete out_diff_use;
-    }
-    else{
+
+    } else {
+
       auto def_set = instr_info->Def();
-      if(def_set != nullptr){
-        auto def_list = def_set->GetList();
-        auto out_list = out_set->GetList();
-        for(auto def : def_list){
-          if(def == reg_manager->Rsp()){
+      if (def_set) {
+        for (auto def : def_set->GetList()) {
+          if (def == reg_manager->Rsp()) {
             continue;
           }
-          for(auto out : out_list){
-            if(out == reg_manager->Rsp()){
+          for (auto out : out_set->GetList()) {
+            if (out == reg_manager->Rsp()) {
               continue;
             }
-            live_graph_.interf_graph->AddEdge(temp_node_map_->Look(def), temp_node_map_->Look(out));
-            live_graph_.interf_graph->AddEdge(temp_node_map_->Look(out), temp_node_map_->Look(def));
+            AddInterferenceEdge(def, out);
           }
         }
       }
     }
   }
-  
 }
+
 
 void LiveGraphFactory::Liveness() {
   

@@ -44,9 +44,12 @@ void print(struct string *s) {
   for (i = 0; i < s->length; i++, p++) putchar(*p);
 }
 
-void printi(int k) { printf("%d", k); }
-
 void flush() { fflush(stdout); }
+
+void printi(int k) { 
+  printf("%d", k);
+  flush();
+ }
 
 struct string consts[256];
 struct string empty = {0, ""};

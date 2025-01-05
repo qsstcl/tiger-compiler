@@ -55,8 +55,6 @@ public:
   void Liveness();
   LiveGraph GetLiveGraph() { return live_graph_; }
   tab::Table<temp::Temp, INode> *GetTempNodeMap() { return temp_node_map_; }
-
-// private:
   fg::FGraphPtr flowgraph_;
   LiveGraph live_graph_;
 
@@ -65,8 +63,9 @@ public:
   tab::Table<temp::Temp, INode> *temp_node_map_;
 
   void LiveMap();
-  void InterfGraph();
-  // some support function to support LiveMap()
+  void InterfGraph();  
+  void AddMoveEdges(temp::Temp* def, temp::TempList* use_set);
+  void AddInterferenceEdge(temp::Temp* t1, temp::Temp* t2);
   temp::TempList* CalculateNewIn(temp::TempList* use, temp::TempList* old_out, temp::TempList* def);
   temp::TempList* CalculateNewOut(fg::FNodePtr n);
 };

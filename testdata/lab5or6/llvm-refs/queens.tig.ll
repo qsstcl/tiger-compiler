@@ -434,6 +434,7 @@ if_then3:                                         ; preds = %opand_next8
   %145 = add i64 %try_sp, %144
   %146 = inttoptr i64 %145 to i64*
   %147 = load i64, i64* %146, align 4
+; 
   %148 = load i64, i64* @tigermain_framesize_global, align 4
   %149 = add i64 %148, -16
   %150 = add i64 %147, %149
@@ -446,6 +447,7 @@ if_then3:                                         ; preds = %opand_next8
   %155 = load i32, i32* %try_r_ptr23, align 4
   %156 = getelementptr i32, i32* %154, i32 %155
   store i32 0, i32* %156, align 4
+; 
   %157 = load i64, i64* @try_framesize_global, align 4
   %158 = add i64 %157, 8
   %159 = add i64 %try_sp, %158

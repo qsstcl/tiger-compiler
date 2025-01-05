@@ -13,14 +13,11 @@ col::Result Color::RAColor(){
     while(!(simplifyWorklist->GetList().empty() && worklistMoves->GetList().empty() && freezeWorklist->GetList().empty() && spillWorklist->GetList().empty())){
         if(!simplifyWorklist->GetList().empty()){
             Simplify();
-        }
-        else if(!worklistMoves->GetList().empty()){
+        }else if(!worklistMoves->GetList().empty()){
             Coalesce();
-        }
-        else if(!freezeWorklist->GetList().empty()){
+        }else if(!freezeWorklist->GetList().empty()){
             Freeze();
-        }
-        else if(!spillWorklist->GetList().empty()){
+        }else if(!spillWorklist->GetList().empty()){
             SelectSpill();
         }
     }
@@ -29,11 +26,10 @@ col::Result Color::RAColor(){
         auto res = col::Result();
         res.spills = spilledNodes;
         return res;
-    }
-    else{
+    }else{
         auto res = col::Result();
         res.coloring = temp::Map::Empty();
-        auto node_list = ig->Nodes()->GetList();
+        auto node_list = interference_graph->Nodes()->GetList();
         for(auto node : node_list){
             auto temp = node->NodeInfo();
             auto node_color = color->Look(node);
@@ -47,14 +43,10 @@ col::Result Color::RAColor(){
 void Color::Build(){
     flow_fac = new fg::FlowGraphFactory(instr_list);
     flow_fac->AssemFlowGraph();
-    // auto fg_fac = fg::FlowGraphFactory(instr_list);
-    // fg_fac.AssemFlowGraph();
     live_fac = new live::LiveGraphFactory(flow_fac->GetFlowGraph());
     live_fac->Liveness();
-    // auto live_fac = live::LiveGraphFactory(fg_fac.GetFlowGraph());
-    // live_fac.Liveness();
-    auto lg = live_fac->GetLiveGraph();
-    ig = lg.interf_graph;
+    auto live_graph = live_fac->GetLiveGraph();
+    interference_graph = live_graph.interf_graph;
     precolored = new live::INodeList();
     simplifyWorklist = new live::INodeList();
     freezeWorklist = new live::INodeList();
@@ -67,43 +59,42 @@ void Color::Build(){
     coalescedMoves = new live::MoveList();
     constrainedMoves = new live::MoveList();
     frozenMoves = new live::MoveList();
-    worklistMoves = lg.moves;
+    worklistMoves = live_graph.moves;
     activeMoves = new live::MoveList();
-
+    
+    
     degree = new graph::Table<temp::Temp, int>();
     moveList = new graph::Table<temp::Temp, live::MoveList>();
     alias = new graph::Table<temp::Temp, live::INode>();
     color = new graph::Table<temp::Temp, temp::Temp>();
 
-    auto reg_list = reg_manager->Registers()->GetList();
+    auto machine_reg_list = reg_manager->Registers()->GetList();
     auto node_map = live_fac->GetTempNodeMap();
-    for(auto reg : reg_list){
+    for(auto reg : machine_reg_list){
         auto reg_node = node_map->Look(reg);
         precolored->Append(reg_node);
         coloredNodes->Append(reg_node);
         color->Enter(reg_node, reg);
     }
 
-    auto node_list = ig->Nodes()->GetList();
+    auto node_list = interference_graph->Nodes()->GetList();
     for(auto node : node_list){
-        auto node_moveList = new live::MoveList();
-        auto allMoves_list = lg.moves->GetList();
-        for(auto move_rel : allMoves_list){
-            if(move_rel.first == node || move_rel.second == node){
-                if(!node_moveList->Contain(move_rel.first, move_rel.second)){
-                    node_moveList->Append(move_rel.first, move_rel.second);
+
+        auto current_node_move = new live::MoveList();
+        auto all_moves = live_graph.moves->GetList();
+        for(auto single_move : all_moves){
+            if(single_move.first == node || single_move.second == node){
+                if(!current_node_move->Contain(single_move.first, single_move.second)){
+                    current_node_move->Append(single_move.first, single_move.second);
                 }
             }
         }
-        moveList->Enter(node, node_moveList);
+        moveList->Enter(node, current_node_move);
         int *node_degree = new int(0);
         if(precolored->Contain(node)){
-            /**
-             * If a node is precolored, we should set its degree to a large number
-            */
-            *node_degree = 1000;
-        }
-        else{
+            // precolored nodes have very large degree
+            *node_degree = 10000;
+        }else{
             *node_degree = node->OutDegree();
         }
         degree->Enter(node, node_degree);
@@ -112,8 +103,8 @@ void Color::Build(){
 
 void Color::AddEdge(live::INodePtr u, live::INodePtr v){
     if(!u->Succ()->Contain(v) && u != v){
-        ig->AddEdge(u, v);
-        ig->AddEdge(v, u);
+        interference_graph->AddEdge(u, v);
+        interference_graph->AddEdge(v, u);
         auto u_degree_ptr = degree->Look(u);
         auto v_degree_ptr = degree->Look(v);
         auto u_value = *u_degree_ptr;
@@ -124,7 +115,7 @@ void Color::AddEdge(live::INodePtr u, live::INodePtr v){
 }
 
 void Color::MakeWorklist(){
-    auto node_list = ig->Nodes()->GetList();
+    auto node_list = interference_graph->Nodes()->GetList();
     for(auto node : node_list){
         if(!precolored->Contain(node)){
             if(*(degree->Look(node)) >= K){
@@ -148,9 +139,7 @@ live::INodeListPtr Color::Adjacent(live::INodePtr n){
     return res;
 }
 
-/**
- * Construct node's related movelist
-*/
+
 live::MoveList* Color::NodeMoves(live::INodePtr n){
     auto moveList_n = moveList->Look(n);
     auto active_union_work = activeMoves->Union(worklistMoves);
@@ -163,50 +152,36 @@ bool Color::MoveRelated(live::INodePtr n){
     auto node_moves = NodeMoves(n);
     return !node_moves->GetList().empty();
 }
-/**
- * Simulation removes a low-degree node from the graph
- * and decrement its adjacents
-*/
+
 void Color::Simplify(){
     auto n = simplifyWorklist->GetList().front();
     simplifyWorklist->DeleteNode(n);
     selectStack->Prepend(n);
-    auto adj_list = Adjacent(n)->GetList();
-    for(auto m : adj_list){
-        DecrementDegree(m);
+    auto adjacent_node_list = Adjacent(n)->GetList();
+    for(auto single_node : adjacent_node_list){
+        DecrementDegree(single_node);
     }
 }
 
-/**
- * If we remove a node, we should decrease this 
- * node's every adjacent nodes' degree
-*/
+
 void Color::DecrementDegree(live::INodePtr m){
-    auto d_ptr = degree->Look(m);
-    auto d_initial_value = *d_ptr;
-    *d_ptr = d_initial_value - 1;
-    if(d_initial_value == K){
+    auto degree_ptr = degree->Look(m);
+    auto origin_degree = *degree_ptr;
+    *degree_ptr = origin_degree - 1;
+    if(origin_degree == K){
         auto m_union_adj = Adjacent(m);
         m_union_adj->Append(m);
-        /**
-         * If a node's degree decrease to K-1 its move related instruction
-         * (if exist) will become possible to coalesce
-        */
         EnableMoves(m_union_adj);
         spillWorklist->DeleteNode(m);
         if(MoveRelated(m)){
-            // freezeWorklist is low degree move related nodes
             freezeWorklist->Append(m);
-        }
-        else{
+        }else{
             simplifyWorklist->Append(m);
         }
     }
 }
 
-/**
- * let nodes' related moves become possible to coalesce
-*/
+
 void Color::EnableMoves(live::INodeListPtr nodes){
     auto nodes_list = nodes->GetList();
     for(auto n : nodes_list){
@@ -233,8 +208,7 @@ void Color::Coalesce(){
     if(precolored->Contain(y)){
         u = y;
         v = x;
-    }
-    else{
+    }else{
         u = x;
         v = y;
     }
@@ -244,34 +218,26 @@ void Color::Coalesce(){
             coalescedMoves->Append(m.first, m.second);
         }
         AddWorkList(u);
-    }
-    else if(precolored->Contain(v) || u->Succ()->Contain(v)){
+    }else if(precolored->Contain(v) || u->Succ()->Contain(v)){
         if(!constrainedMoves->Contain(m.first, m.second)){
             constrainedMoves->Append(m.first, m.second);
         }
         AddWorkList(u);
         AddWorkList(v);
-    }
-    else if((precolored->Contain(u) && OK(v, u)) || (!precolored->Contain(u) && Conservative(Adjacent(u)->Union(Adjacent(v))))){
+    }else if((precolored->Contain(u) && OK(v, u)) || (!precolored->Contain(u) && Conservative(Adjacent(u)->Union(Adjacent(v))))){
         if(!coalescedMoves->Contain(m.first, m.second)){
             coalescedMoves->Append(m.first, m.second);
         }
         Combine(u, v);
         AddWorkList(u);
-    }
-    else{
+    }else{
         if(!activeMoves->Contain(m.first, m.second)){
             activeMoves->Append(m.first, m.second);
         }
     }
 }
 
-/**
- * If we give up to coalesce some node
- * and this node is a low-degree node
- * we should move it from freezeWorkList
- * to simpifyWorkList
-*/
+
 void Color::AddWorkList(live::INodePtr u){
     if(!precolored->Contain(u) && !MoveRelated(u) && (*(degree->Look(u)) < K)){
         freezeWorklist->DeleteNode(u);
@@ -281,11 +247,7 @@ void Color::AddWorkList(live::INodePtr u){
     }
 }
 
-/**
- * George
-*/
-//! This OK function is a little different from book's.
-//! For convenience, we add adjacent loop into function
+
 bool Color::OK(live::INodePtr t, live::INodePtr r){
     auto adj_list = Adjacent(t)->GetList();
     for(auto adj : adj_list){
@@ -295,9 +257,7 @@ bool Color::OK(live::INodePtr t, live::INodePtr r){
     }
     return true;
 }
-/**
- * Briggs
-*/
+
 bool Color::Conservative(live::INodeListPtr nodes){
     int k = 0;
     auto node_list = nodes->GetList();
@@ -348,10 +308,7 @@ void Color::Combine(live::INodePtr u, live::INodePtr v){
     }
 }
 
-/**
- * When all nodes which can be coalesced are
- * handled, we should let some move freeze
-*/
+
 void Color::Freeze(){
     auto u = freezeWorklist->GetList().front();
     freezeWorklist->DeleteNode(u);
@@ -389,9 +346,7 @@ void Color::FreezeMoves(live::INodePtr u){
     }
 }
 
-/**
- * try letting a high-degree node remove from graph
-*/
+
 void Color::SelectSpill(){
     auto m = spillWorklist->GetList().front();
     spillWorklist->DeleteNode(m);
@@ -403,37 +358,37 @@ void Color::SelectSpill(){
 
 void Color::AssignColors(){
     auto selectStack_list = selectStack->GetList();
-    for(auto n : selectStack_list){
-        auto okColors = reg_manager->Registers();
-        auto adjList_n = n->Succ()->GetList();
+    for(auto single_node : selectStack_list){
+        auto ok_colors = reg_manager->Registers();
+        auto adj_list = single_node->Succ()->GetList();
         auto colored_union_precolored = coloredNodes->Union(precolored);
         // conflict with all adjacent nodes' color
-        for(auto w : adjList_n){
+        for(auto w : adj_list){
             auto w_alias = GetAlias(w);
             if(colored_union_precolored->Contain(w_alias)){
                 auto temp_colored = new temp::TempList();
                 temp_colored->Append(color->Look(w_alias));
-                okColors = okColors->Diff(temp_colored);
+                ok_colors = ok_colors->Diff(temp_colored);
             }
         }
-        if(okColors->GetList().empty()){
-            if(!spilledNodes->Contain(n)){
-                spilledNodes->Append(n);
+        if(ok_colors->GetList().empty()){
+            if(!spilledNodes->Contain(single_node)){
+                spilledNodes->Append(single_node);
             }
         }
         else{
-            if(!coloredNodes->Contain(n)){
-                coloredNodes->Append(n);
+            if(!coloredNodes->Contain(single_node)){
+                coloredNodes->Append(single_node);
             }
-            auto c = okColors->GetList().front();
-            color->Enter(n, c);
+            auto selected_color = ok_colors->GetList().front();
+            color->Enter(single_node, selected_color);
         }
     }
     selectStack->Clear();
     auto coalesced_list = coalescedNodes->GetList();
-    for(auto n : coalesced_list){
-        auto alias_color = color->Look(GetAlias(n));
-        color->Enter(n, alias_color);
+    for(auto node : coalesced_list){
+        auto alias_color = color->Look(GetAlias(node));
+        color->Enter(node, alias_color);
     }
 }
 
